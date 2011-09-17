@@ -1,0 +1,17 @@
+<package>
+  <description brief="poark_client">
+
+     poark_client
+
+  </description>
+  <author>Julian Pastarmov</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/poark_client</url>
+  <depend package="std_msgs"/>
+  <depend package="rospy"/>
+  <depend package="roscpp"/>
+
+</package>
+
+
