@@ -7,7 +7,7 @@
 const bool LOW = false;
 const bool HIGH = true;
 
-enum PinDirection { OUT, IN, ANALOG, NONE };
+enum PiMode { OUT, IN, ANALOG, PWM_MODE, NONE };
 
 const int kPinCount = 70;
 
@@ -25,15 +25,15 @@ void PinsCallback(const std_msgs::UInt16MultiArray::ConstPtr& msg)
 // Adds a pin definition for /set_pins_state message.
 void AddPinDefinition(std_msgs::UInt8MultiArray* msg,
                      int pin,
-                     PinDirection direction,
-                     bool state) {
+                     PiMode mode,
+                     int state) {
   msg->data.push_back(pin);
-  msg->data.push_back(direction);
+  msg->data.push_back(mode);
   msg->data.push_back(state);
 }
 
 // Adds a pin state for /set_pins message.
-void AddPinState(std_msgs::UInt8MultiArray* msg, int pin, bool state) {
+void AddPinState(std_msgs::UInt8MultiArray* msg, int pin, int state) {
   msg->data.push_back(pin);
   msg->data.push_back(state);
 }
@@ -53,8 +53,10 @@ int main(int argc, char **argv)
   std_msgs::UInt8MultiArray msg;
   msg.data.clear();
   AddPinDefinition(&msg, 13, OUT, LOW);
-  AddPinDefinition(&msg, 8, OUT, LOW);
-  AddPinDefinition(&msg, 54, ANALOG, LOW);
+  AddPinDefinition(&msg, 8, PWM_MODE, 0);
+  AddPinDefinition(&msg, 9, PWM_MODE, 0);
+  AddPinDefinition(&msg, 10, PWM_MODE, 0);
+  AddPinDefinition(&msg, 56, ANALOG, LOW);
   ROS_INFO("Sending /set_pins_state msg.");
   pins_state_pub.publish(msg);
   // Repeat the sending because ros-serial seems to eat our first message.
@@ -69,10 +71,12 @@ int main(int argc, char **argv)
   int count = 0;
   while (ros::ok())
   {
-    if(count % 100 == 0) {
+    if(count % 10 == 0) {
       std_msgs::UInt8MultiArray msg2;
       msg2.data.clear();
-      AddPinState(&msg2, 8, count % 400 == 0 ? HIGH : LOW);
+      AddPinState(&msg2, 8, (count/10) % 50 + 200);
+      AddPinState(&msg2, 9, (count/10) % 50 + 200);
+      AddPinState(&msg2, 10, (count/10) % 50 + 200);
       AddPinState(&msg2, 13, count % 200 == 0 ? HIGH : LOW);
       ROS_INFO("Sending set_pins msg : %d.", count);
       pins_pub.publish(msg2);
@@ -80,14 +84,16 @@ int main(int argc, char **argv)
     ros::spinOnce();
     loop_rate.sleep();
     ++count;
-    if (count > 220)
+    if (count > 200)
       break;
   }
 
   msg.data.clear();
   AddPinDefinition(&msg, 13, NONE, LOW);
-  AddPinDefinition(&msg, 8, NONE, LOW);
-  AddPinDefinition(&msg, 54, NONE, LOW);
+  AddPinDefinition(&msg, 8, PWM_MODE, 255);
+  AddPinDefinition(&msg, 9, PWM_MODE, 255);
+  AddPinDefinition(&msg, 10, PWM_MODE, 255);
+  AddPinDefinition(&msg, 56, NONE, LOW);
   ROS_INFO("Sending /set_pins_state msg.");
   pins_state_pub.publish(msg);
   return 0;
