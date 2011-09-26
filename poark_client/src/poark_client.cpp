@@ -7,7 +7,7 @@
 const bool LOW = false;
 const bool HIGH = true;
 
-enum PiMode { OUT, IN, ANALOG, PWM_MODE, NONE };
+enum PinMode { OUT, IN, ANALOG, PWM_MODE, NONE };
 
 const int kPinCount = 70;
 
@@ -25,7 +25,7 @@ void PinsCallback(const std_msgs::UInt16MultiArray::ConstPtr& msg)
 // Adds a pin definition for /set_pins_state message.
 void AddPinDefinition(std_msgs::UInt8MultiArray* msg,
                      int pin,
-                     PiMode mode,
+                     PinMode mode,
                      int state) {
   msg->data.push_back(pin);
   msg->data.push_back(mode);
