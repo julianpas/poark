@@ -7,7 +7,7 @@
 const bool LOW = false;
 const bool HIGH = true;
 
-enum PinMode { OUT, IN, ANALOG, PWM_MODE, NONE };
+enum PinMode { OUT, IN, ANALOG, ANALOG_FILT, PWM_MODE, NONE=0xff };
 
 const int kPinCount = 70;
 
@@ -57,6 +57,7 @@ int main(int argc, char **argv)
   AddPinDefinition(&msg, 9, PWM_MODE, 0);
   AddPinDefinition(&msg, 10, PWM_MODE, 0);
   AddPinDefinition(&msg, 56, ANALOG, LOW);
+  AddPinDefinition(&msg, 57, ANALOG_FILT, LOW);
   ROS_INFO("Sending /set_pins_state msg.");
   pins_state_pub.publish(msg);
   // Repeat the sending because ros-serial seems to eat our first message.
@@ -94,6 +95,7 @@ int main(int argc, char **argv)
   AddPinDefinition(&msg, 9, PWM_MODE, 255);
   AddPinDefinition(&msg, 10, PWM_MODE, 255);
   AddPinDefinition(&msg, 56, NONE, LOW);
+  AddPinDefinition(&msg, 57, NONE, LOW);
   ROS_INFO("Sending /set_pins_state msg.");
   pins_state_pub.publish(msg);
   return 0;
