@@ -7,9 +7,17 @@
 const bool LOW = false;
 const bool HIGH = true;
 
-enum PinMode { OUT, IN, ANALOG, ANALOG_FILT, PWM_MODE, NONE=0xff };
+enum PinMode { OUT, IN, ANALOG, ANALOG_FILT, PWM_MODE, SERVO, NONE=0xff };
 
 const int kPinCount = 70;
+const int kServoControlPin = 54;
+const int kServoPin = 7;
+
+// Variables to control the update of the servo position.  Keep
+// volatile as they are changed asynchronously in a call back
+// function.
+volatile int g_servo_angle = 90;
+volatile bool g_update_servo_angle = true;
 
 // A callback for the /pins message from a Poark server.
 // |msg| has the following layout:
@@ -18,8 +26,17 @@ const int kPinCount = 70;
 // For analog pins it will be a value between 0 and 1023.
 void PinsCallback(const std_msgs::UInt16MultiArray::ConstPtr& msg)
 {
-  for (size_t i = 0;i < msg->data.size()/2;i++)
-    ROS_INFO("Pin %d : %d", (int)msg->data[i*2], (int)msg->data[i*2 + 1]);
+  for (size_t i = 0;i < msg->data.size()/2;i++) {
+    int pin = static_cast<int>(msg->data[i*2]);
+    int value = static_cast<int>(msg->data[i*2 + 1]);
+    ROS_INFO("Pin %d : %d", pin, value);
+    if (pin == kServoControlPin) {
+      // The servo control should be an angle between 0 and 180 degrees.
+      int angle = static_cast<int>(value*180/1024);
+      g_servo_angle = angle;
+      g_update_servo_angle = true;
+    }
+  }
 }
 
 // Adds a pin definition for /set_pins_state message.
@@ -56,8 +73,8 @@ int main(int argc, char **argv)
   AddPinDefinition(&msg, 8, PWM_MODE, 0);
   AddPinDefinition(&msg, 9, PWM_MODE, 0);
   AddPinDefinition(&msg, 10, PWM_MODE, 0);
-  AddPinDefinition(&msg, 56, ANALOG, LOW);
-  AddPinDefinition(&msg, 57, ANALOG_FILT, LOW);
+  AddPinDefinition(&msg, kServoControlPin, ANALOG, LOW);
+  AddPinDefinition(&msg, kServoPin, SERVO, 90);
   ROS_INFO("Sending /set_pins_state msg.");
   pins_state_pub.publish(msg);
   // Repeat the sending because ros-serial seems to eat our first message.
@@ -72,7 +89,7 @@ int main(int argc, char **argv)
   int count = 0;
   while (ros::ok())
   {
-    if(count % 10 == 0) {
+    if (count % 10 == 0) {
       std_msgs::UInt8MultiArray msg2;
       msg2.data.clear();
       AddPinState(&msg2, 8, (count/10) % 50 + 200);
@@ -82,10 +99,17 @@ int main(int argc, char **argv)
       ROS_INFO("Sending set_pins msg : %d.", count);
       pins_pub.publish(msg2);
     }
+    if (g_update_servo_angle) {
+      std_msgs::UInt8MultiArray msg;
+      msg.data.clear();
+      AddPinState(&msg, kServoPin, g_servo_angle);
+      pins_pub.publish(msg);
+      g_update_servo_angle = false;
+    }
     ros::spinOnce();
     loop_rate.sleep();
     ++count;
-    if (count > 200)
+    if (count > 30000)
       break;
   }
 
@@ -94,10 +118,9 @@ int main(int argc, char **argv)
   AddPinDefinition(&msg, 8, PWM_MODE, 255);
   AddPinDefinition(&msg, 9, PWM_MODE, 255);
   AddPinDefinition(&msg, 10, PWM_MODE, 255);
-  AddPinDefinition(&msg, 56, NONE, LOW);
-  AddPinDefinition(&msg, 57, NONE, LOW);
+  AddPinDefinition(&msg, kServoControlPin, NONE, LOW);
+  AddPinDefinition(&msg, kServoPin, NONE, LOW);
   ROS_INFO("Sending /set_pins_state msg.");
   pins_state_pub.publish(msg);
   return 0;
 }
-
