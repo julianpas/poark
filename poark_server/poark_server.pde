@@ -54,6 +54,33 @@ bool IsInputMode(PinConfig::PinMode mode) {
           mode == PinConfig::ANALOG_FILT);
 }
 
+int GetPin(int pin) {
+  switch (g_pins[pin].pin_mode) {
+    case PinConfig::ANALOG: {
+      return analogRead(pin);
+    }
+    case PinConfig::ANALOG_FILT: {
+      float& filter_data = g_pins[pin].filter_data;
+      int reading = analogRead(pin);
+      if (filter_data == -1.)
+        filter_data = reading;
+      else
+        filter_data = (1-kFilterLambda)*reading + kFilterLambda*filter_data;
+      return static_cast<int>(filter_data + 0.5);
+    }
+    default: {  // Digital input
+      return digitalRead(pin);
+    }
+  }
+}
+
+void SetPin(int pin, int state) {
+  if (g_pins[pin].pin_mode != PinConfig::PWM_MODE)
+    digitalWrite(pin, g_pins[pin].state ? HIGH : LOW);
+  else
+    analogWrite(pin, g_pins[pin].state);
+}
+
 // The callback for the set_pins_state message.
 ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
   for (int i = 0;i < ports_msg_in.data_length/3;i++) {
@@ -73,10 +100,7 @@ ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
       g_pins[pin].filter_data = -1.;
       pinMode(pin, IsInputMode(g_pins[pin].pin_mode) ? INPUT : OUTPUT);
       // We have to set the state for both new in and out pins.
-      if (g_pins[pin].pin_mode != PinConfig::PWM_MODE)
-        digitalWrite(pin, g_pins[pin].state);
-      else
-        analogWrite(pin, g_pins[pin].state);
+      SetPin(pin, g_pins[pin].state)
     }
 #ifdef LCD_DEBUG
     sprintf(text, "P%02d:%d=%d",
@@ -95,10 +119,7 @@ ROS_CALLBACK(SetPins, std_msgs::UInt8MultiArray, pins_msg_in)
     if (!IsInputMode(g_pins[pin].pin_mode) &&
         g_pins[pin].pin_mode != PinConfig::NONE) {
       g_pins[pin].state = state;
-      if (g_pins[pin].pin_mode != PinConfig::PWM_MODE)
-        digitalWrite(pin, g_pins[pin].state ? HIGH : LOW);
-      else
-        analogWrite(pin, g_pins[pin].state);
+      SetPin(pin, state);
     }
 #ifdef LCD_DEBUG
     else state = 9;
@@ -156,28 +177,7 @@ void loop()
   int out_pins_count = 0;
   for (int i = 0;i < kPinCount;i++) {
     if (IsInputMode(g_pins[i].pin_mode)) {
-      int reading;
-      switch (g_pins[i].pin_mode) {
-        case PinConfig::ANALOG: {
-          reading = analogRead(i);
-          break;
-        }
-        case PinConfig::ANALOG_FILT: {
-          float& filter_data = g_pins[i].filter_data;
-          reading = analogRead(i);
-          if (filter_data == -1.)
-            filter_data = reading;
-          else
-            filter_data = (1-kFilterLambda)*reading + kFilterLambda*filter_data;
-          reading = static_cast<int>(filter_data + 0.5);
-          break;
-        }
-        default: {  // Digital input
-          reading = digitalRead(i);
-          break;
-        }
-      }
-
+      int reading = GetPin(i);
       if (reading != g_pins[i].reading) {
         ports_msg_out.data[out_pins_count * 2 + 0] = i;
         ports_msg_out.data[out_pins_count * 2 + 1] = reading;
