@@ -3,6 +3,12 @@
 #include <std_msgs/UInt8MultiArray.h>
 #include <std_msgs/UInt16MultiArray.h>
 
+#define WITH_SERVO 1
+
+#ifdef WITH_SERVO
+#include <Servo.h>
+#endif
+
 #define LCD_DEBUG 1
 
 #ifdef LCD_DEBUG
@@ -16,11 +22,14 @@ const int kLedPin = 13;
 ////////////////////////
 // Defines a pin and stores its state.
 typedef struct PinConfig{
-  enum PinMode { OUT, IN, ANALOG, ANALOG_FILT, PWM_MODE, NONE=0xff };
+  enum PinMode { OUT, IN, ANALOG, ANALOG_FILT, PWM_MODE, SERVO, NONE=0xff };
   PinMode pin_mode;
   int state;
   int reading;
   float filter_data;
+#ifdef WITH_SERVO
+  Servo servo;
+#endif
 };
 // Number of pins to be controlled (70 on a Mega board)
 const int kPinCount = 70;
@@ -75,10 +84,19 @@ int GetPin(int pin) {
 }
 
 void SetPin(int pin, int state) {
-  if (g_pins[pin].pin_mode != PinConfig::PWM_MODE)
-    digitalWrite(pin, g_pins[pin].state ? HIGH : LOW);
-  else
-    analogWrite(pin, g_pins[pin].state);
+  switch (g_pins[pin].pin_mode) {
+    case PinConfig::PWM_MODE:
+      analogWrite(pin, g_pins[pin].state);
+      break;
+#ifdef WITH_SERVO
+    case PinConfig::SERVO:
+      g_pins[pin].servo.attach(pin);
+      g_pins[pin].servo.write(constrain(g_pins[pin].state, 0, 179));
+      break;
+#endif WITH_SERVO
+    default:  // Digital output
+      digitalWrite(pin, g_pins[pin].state);
+  }
 }
 
 // The callback for the set_pins_state message.
@@ -87,6 +105,14 @@ ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
     int pin = ports_msg_in.data[i*3 + 0];
     g_pins[pin].pin_mode =
         static_cast<PinConfig::PinMode>(ports_msg_in.data[i*3 + 1]);
+#ifdef WITH_SERVO
+    if (g_pins[pin].pin_mode != PinConfig::SERVO &&
+        g_pins[pin].servo.attached())
+      g_pins[pin].servo.detach();
+    if (g_pins[pin].pin_mode == PinConfig::SERVO &&
+        !g_pins[pin].servo.attached())
+      g_pins[pin].servo.attach(pin);
+#endif
     g_pins[pin].state = ports_msg_in.data[i*3 + 2];
     g_pins[pin].reading = ports_msg_in.data[i*3 + 2];
     if (g_pins[pin].pin_mode != PinConfig::NONE) {
@@ -100,7 +126,7 @@ ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
       g_pins[pin].filter_data = -1.;
       pinMode(pin, IsInputMode(g_pins[pin].pin_mode) ? INPUT : OUTPUT);
       // We have to set the state for both new in and out pins.
-      SetPin(pin, g_pins[pin].state)
+      SetPin(pin, g_pins[pin].state);
     }
 #ifdef LCD_DEBUG
     sprintf(text, "P%02d:%d=%d",
