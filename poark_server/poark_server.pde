@@ -4,12 +4,16 @@
 #include <std_msgs/UInt16MultiArray.h>
 
 #define WITH_SERVO 1
+#define WITH_WIRE 1
+#define LCD_DEBUG 1
 
 #ifdef WITH_SERVO
 #include <Servo.h>
 #endif
 
-#define LCD_DEBUG 1
+#ifdef WITH_WIRE
+#include <Wire.h>
+#endif
 
 #ifdef LCD_DEBUG
 #include <ks0108.h>  // library header
@@ -35,13 +39,17 @@ typedef struct PinConfig{
 const int kPinCount = 70;
 
 // Sampling frequency in Hz.
-const int kSampleFrequency = 20;
+const int kSampleFrequency = 200;
 
 // The inner pin representation and status.
 PinConfig g_pins[kPinCount];
 
-// The lambda, forgetting factor for analog data filtering (~100 samples window)
+// The lambda, forgetting factor for analog data filtering
+// (~100 samples window)
 const float kFilterLambda = 0.99;
+
+// Maximal length of I2C message in bytes.
+const int kMaxI2CResponseLen = 10;
 
 #ifdef LCD_DEBUG
 // Buffer for debug text output to the display.
@@ -55,7 +63,9 @@ ros::NodeHandle nh;
 
 // Output data buffer.
 unsigned int ports_msg_out_data[2 * kPinCount];
+byte i2c_msg_out_data[kMaxI2CResponseLen + 2];
 std_msgs::UInt16MultiArray ports_msg_out;
+std_msgs::UInt8MultiArray i2c_msg_out;
 
 bool IsInputMode(PinConfig::PinMode mode) {
   return (mode == PinConfig::IN ||
@@ -165,15 +175,62 @@ ros::Subscriber sub_set_pins("set_pins",
                              &pins_msg_in,
                              &SetPins);
 
+#ifdef WITH_WIRE
+// The publisher for i2c_response.
+ros::Publisher pub_i2c_response("i2c_response", &i2c_msg_out);
+
+// The callback for the i2c_io message.
+ROS_CALLBACK(I2cIO, std_msgs::UInt8MultiArray, i2c_msg_in)
+  int address = i2c_msg_in.data[0];
+  int send_len = i2c_msg_in.data_length - 3;
+  int receive_len =
+      (i2c_msg_in.data[1] <= kMaxI2CResponseLen) ?
+          i2c_msg_in.data[1] : kMaxI2CResponseLen;
+  int token = i2c_msg_in.data[2];
+  if (send_len > 0) {
+    Wire.beginTransmission(address);
+    Wire.send(&i2c_msg_in.data[3], send_len);
+    Wire.endTransmission();
+  }
+  i2c_msg_out.data_length = 2;
+  i2c_msg_out.data[0] = address;
+  i2c_msg_out.data[1] = token;
+  if (receive_len > 0) {
+    Wire.requestFrom(address, receive_len);
+    for (int i = 0; i < receive_len; ++i, ++i2c_msg_out.data_length) {
+      // TODO(pastarmovj): Investigate whether this issue with resending
+      // the last byte is caused by the joystick or if it is an I2C
+      // feature.
+      while (Wire.available())
+        i2c_msg_out.data[i2c_msg_out.data_length] = Wire.receive();
+    }
+  }
+  pub_i2c_response.publish(&i2c_msg_out);
+#ifdef LCD_DEBUG
+  sprintf(g_dbg_text, "I2C%d>%d<%d  ", address, send_len, receive_len);
+  GLCD.CursorTo(12,g_dbg_line_right++ % 8);
+  GLCD.Puts(g_dbg_g_dbg_text);
+#endif
+}
+
+ros::Subscriber sub_i2c_io("i2c_io",
+                           &i2c_msg_in,
+                           &I2cIO);
+
+#endif  // WITH_WIRE
+
 // Arduino setup function. Called once for initialization.
 void setup()
 {
   nh.initNode();
 
-  // Define the output array.
+  // Define the output arrays.
   ports_msg_out.data_length = kPinCount*4;
   ports_msg_out.data = ports_msg_out_data;
+  i2c_msg_out.data_length = 255;
+  i2c_msg_out.data = i2c_msg_out_data;
 
+  // Digital and analog pin interface
   nh.advertise(pub_pin_state_changed);
   nh.subscribe(sub_set_pins_state);
   nh.subscribe(sub_set_pins);
@@ -183,6 +240,13 @@ void setup()
     g_pins[i].pin_mode = PinConfig::NONE;
     g_pins[i].state = LOW;
   }
+
+#ifdef WITH_WIRE
+  // I2C interface
+  nh.advertise(pub_i2c_response);
+  nh.subscribe(sub_i2c_io);
+  Wire.begin();
+#endif  // WITH_WIRE
   //initialize the LED output pin,
   pinMode(kLedPin, OUTPUT);
   digitalWrite(kLedPin, HIGH);
