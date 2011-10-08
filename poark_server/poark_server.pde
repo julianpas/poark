@@ -53,19 +53,19 @@ const int kMaxI2CResponseLen = 10;
 
 #ifdef LCD_DEBUG
 // Buffer for debug text output to the display.
-char text[20];
-int line_left = 0;
-int line_right = 0;
+char g_dbg_text[20];
+int g_dbg_line_left = 0;
+int g_dbg_line_right = 0;
 #endif
 
 // ROS Definitions
-ros::NodeHandle nh;
+ros::NodeHandle g_node_handle;
 
 // Output data buffer.
-unsigned int ports_msg_out_data[2 * kPinCount];
-byte i2c_msg_out_data[kMaxI2CResponseLen + 2];
-std_msgs::UInt16MultiArray ports_msg_out;
-std_msgs::UInt8MultiArray i2c_msg_out;
+unsigned int g_ports_msg_out_data[2 * kPinCount];
+byte g_i2c_msg_out_data[kMaxI2CResponseLen + 2];
+std_msgs::UInt16MultiArray g_ports_msg_out;
+std_msgs::UInt8MultiArray g_i2c_msg_out;
 
 bool IsInputMode(PinConfig::PinMode mode) {
   return (mode == PinConfig::IN ||
@@ -109,6 +109,9 @@ void SetPin(int pin, int state) {
   }
 }
 
+// The communication primitives.
+ros::Publisher pub_pin_state_changed("pins", &g_ports_msg_out);
+
 // The callback for the set_pins_state message.
 ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
   for (int i = 0;i < ports_msg_in.data_length/3;i++) {
@@ -139,10 +142,10 @@ ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
       SetPin(pin, g_pins[pin].state);
     }
 #ifdef LCD_DEBUG
-    sprintf(text, "P%02d:%d=%d",
+    sprintf(g_dbg_text, "P%02d:%d=%d",
             pin, g_pins[pin].pin_mode, g_pins[pin].state);
-    GLCD.CursorTo(12,line_right++ % 8);
-    GLCD.Puts(text);
+    GLCD.CursorTo(12,g_dbg_line_right++ % 8);
+    GLCD.Puts(g_dbg_text);
 #endif
   }
 }
@@ -159,15 +162,14 @@ ROS_CALLBACK(SetPins, std_msgs::UInt8MultiArray, pins_msg_in)
     }
 #ifdef LCD_DEBUG
     else state = 9;
-    sprintf(text, "S%02d=%d  ", pin, state);
-    GLCD.CursorTo(12,line_right++ % 8);
-    GLCD.Puts(text);
+    sprintf(g_dbg_text, "S%02d=%d  ", pin, state);
+    GLCD.CursorTo(12,g_dbg_line_right++ % 8);
+    GLCD.Puts(g_dbg_text);
 #endif
   }
 }
 
-// The communication primitives.
-ros::Publisher pub_pin_state_changed("pins", &ports_msg_out);
+// The subscriber objects for set_pins_state and set_pins.
 ros::Subscriber sub_set_pins_state("set_pins_state",
                                    &ports_msg_in,
                                    &SetPinsState);
@@ -177,7 +179,7 @@ ros::Subscriber sub_set_pins("set_pins",
 
 #ifdef WITH_WIRE
 // The publisher for i2c_response.
-ros::Publisher pub_i2c_response("i2c_response", &i2c_msg_out);
+ros::Publisher pub_i2c_response("i2c_response", &g_i2c_msg_out);
 
 // The callback for the i2c_io message.
 ROS_CALLBACK(I2cIO, std_msgs::UInt8MultiArray, i2c_msg_in)
@@ -192,24 +194,24 @@ ROS_CALLBACK(I2cIO, std_msgs::UInt8MultiArray, i2c_msg_in)
     Wire.send(&i2c_msg_in.data[3], send_len);
     Wire.endTransmission();
   }
-  i2c_msg_out.data_length = 2;
-  i2c_msg_out.data[0] = address;
-  i2c_msg_out.data[1] = token;
+  g_i2c_msg_out.data_length = 2;
+  g_i2c_msg_out.data[0] = address;
+  g_i2c_msg_out.data[1] = token;
   if (receive_len > 0) {
     Wire.requestFrom(address, receive_len);
-    for (int i = 0; i < receive_len; ++i, ++i2c_msg_out.data_length) {
+    for (int i = 0; i < receive_len; ++i, ++g_i2c_msg_out.data_length) {
       // TODO(pastarmovj): Investigate whether this issue with resending
       // the last byte is caused by the joystick or if it is an I2C
       // feature.
       while (Wire.available())
-        i2c_msg_out.data[i2c_msg_out.data_length] = Wire.receive();
+        g_i2c_msg_out.data[g_i2c_msg_out.data_length] = Wire.receive();
     }
   }
-  pub_i2c_response.publish(&i2c_msg_out);
+  pub_i2c_response.publish(&g_i2c_msg_out);
 #ifdef LCD_DEBUG
   sprintf(g_dbg_text, "I2C%d>%d<%d  ", address, send_len, receive_len);
   GLCD.CursorTo(12,g_dbg_line_right++ % 8);
-  GLCD.Puts(g_dbg_g_dbg_text);
+  GLCD.Puts(g_dbg_text);
 #endif
 }
 
@@ -222,18 +224,18 @@ ros::Subscriber sub_i2c_io("i2c_io",
 // Arduino setup function. Called once for initialization.
 void setup()
 {
-  nh.initNode();
+  g_node_handle.initNode();
 
   // Define the output arrays.
-  ports_msg_out.data_length = kPinCount*4;
-  ports_msg_out.data = ports_msg_out_data;
-  i2c_msg_out.data_length = 255;
-  i2c_msg_out.data = i2c_msg_out_data;
+  g_ports_msg_out.data_length = kPinCount*4;
+  g_ports_msg_out.data = g_ports_msg_out_data;
+  g_i2c_msg_out.data_length = 255;
+  g_i2c_msg_out.data = g_i2c_msg_out_data;
 
   // Digital and analog pin interface
-  nh.advertise(pub_pin_state_changed);
-  nh.subscribe(sub_set_pins_state);
-  nh.subscribe(sub_set_pins);
+  g_node_handle.advertise(pub_pin_state_changed);
+  g_node_handle.subscribe(sub_set_pins_state);
+  g_node_handle.subscribe(sub_set_pins);
 
   // Init all pins being neither in nor out.
   for (int i = 0;i < kPinCount;i++) {
@@ -243,8 +245,8 @@ void setup()
 
 #ifdef WITH_WIRE
   // I2C interface
-  nh.advertise(pub_i2c_response);
-  nh.subscribe(sub_i2c_io);
+  g_node_handle.advertise(pub_i2c_response);
+  g_node_handle.subscribe(sub_i2c_io);
   Wire.begin();
 #endif  // WITH_WIRE
   //initialize the LED output pin,
@@ -269,23 +271,23 @@ void loop()
     if (IsInputMode(g_pins[i].pin_mode)) {
       int reading = GetPin(i);
       if (reading != g_pins[i].reading) {
-        ports_msg_out.data[out_pins_count * 2 + 0] = i;
-        ports_msg_out.data[out_pins_count * 2 + 1] = reading;
+        g_ports_msg_out.data[out_pins_count * 2 + 0] = i;
+        g_ports_msg_out.data[out_pins_count * 2 + 1] = reading;
         g_pins[i].reading = reading;
         out_pins_count++;
 #ifdef LCD_DEBUG
-        sprintf(text,"%02d:%4d", i, reading);
-        GLCD.CursorTo(0,line_left++ % 8);
-        GLCD.Puts(text);
+        sprintf(g_dbg_text, "%02d:%4d", i, reading);
+        GLCD.CursorTo(0,g_dbg_line_left++ % 8);
+        GLCD.Puts(g_dbg_text);
 #endif
       }
     }
   }
   if (out_pins_count > 0) {
-    ports_msg_out.data_length = out_pins_count*2;
-    int status = pub_pin_state_changed.publish(&ports_msg_out);
+    g_ports_msg_out.data_length = out_pins_count*2;
+    int status = pub_pin_state_changed.publish(&g_ports_msg_out);
   }
   // Check for new messages and send all our output messages.
-  nh.spinOnce();
+  g_node_handle.spinOnce();
   delay(1000 / kSampleFrequency);
 }
