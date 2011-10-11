@@ -5,6 +5,7 @@
 
 #define WITH_SERVO 1
 #define WITH_WIRE 1
+#define WITH_TIMER 1
 #define LCD_DEBUG 1
 
 #ifdef WITH_SERVO
@@ -13,6 +14,10 @@
 
 #ifdef WITH_WIRE
 #include <Wire.h>
+#endif
+
+#ifdef WITH_TIMER
+#include <MsTimer2.h>
 #endif
 
 #ifdef LCD_DEBUG
@@ -39,7 +44,12 @@ typedef struct PinConfig{
 const int kPinCount = 70;
 
 // Sampling frequency in Hz.
-const int kSampleFrequency = 200;
+const int kSampleFrequency = 100;
+// Maximal sample cycles between servo value refresh. The servos need
+// refreshing every 40ms or so or they tend to forget their position and
+// start to jitter. In order to have proper servo control make sure your
+// sampling frequency is not lower than 25Hz.
+const int kServoRefreshCycles = 35 * kSampleFrequency / 1000;
 
 // The inner pin representation and status.
 PinConfig g_pins[kPinCount];
@@ -66,6 +76,11 @@ unsigned int g_ports_msg_out_data[2 * kPinCount];
 byte g_i2c_msg_out_data[kMaxI2CResponseLen + 2];
 std_msgs::UInt16MultiArray g_ports_msg_out;
 std_msgs::UInt8MultiArray g_i2c_msg_out;
+bool g_need_i2c_publish = false;
+// These variables will be read both from the main loop and the timer 
+// interrupt therefore they shoud be volatile.
+volatile bool g_need_pin_state_publish = false;
+volatile bool g_publishing = false;
 
 bool IsInputMode(PinConfig::PinMode mode) {
   return (mode == PinConfig::IN ||
@@ -207,7 +222,7 @@ ROS_CALLBACK(I2cIO, std_msgs::UInt8MultiArray, i2c_msg_in)
         g_i2c_msg_out.data[g_i2c_msg_out.data_length] = Wire.receive();
     }
   }
-  pub_i2c_response.publish(&g_i2c_msg_out);
+  g_need_i2c_publish = true;
 #ifdef LCD_DEBUG
   sprintf(g_dbg_text, "I2C%d>%d<%d  ", address, send_len, receive_len);
   GLCD.CursorTo(12,g_dbg_line_right++ % 8);
@@ -220,6 +235,71 @@ ros::Subscriber sub_i2c_io("i2c_io",
                            &I2cIO);
 
 #endif  // WITH_WIRE
+
+void ReadSamples() {
+#ifdef WITH_TIMER
+  static bool in_sampling = false;
+  static bool sampling_boost = false;
+  // Avoid reentrance.
+  if (in_sampling || g_publishing) {
+    // Increase sampling frequency temporaryly to make sure sampling
+    // will occur ASAP.
+    if (!sampling_boost) {
+      sampling_boost = true;
+      MsTimer2::set(1, ReadSamples);
+      MsTimer2::start();
+    }
+    return;
+  }
+  in_sampling = true;
+  if (sampling_boost) {
+    // If in sampling boost go back to normal mode.
+    MsTimer2::set(1000 / kSampleFrequency, ReadSamples);
+    MsTimer2::start();
+    sampling_boost = false;
+  }
+#endif  // WITH_TIMER
+
+#ifdef WITH_SERVO
+  static byte servo_refresh = 0;
+#endif  // WITH_SERVO
+
+  int out_pins_count = 0;
+  for (int i = 0;i < kPinCount;i++) {
+    if (IsInputMode(g_pins[i].pin_mode)) {
+      int reading = GetPin(i);
+      if (reading != g_pins[i].reading) {
+        g_ports_msg_out.data[out_pins_count * 2 + 0] = i;
+        g_ports_msg_out.data[out_pins_count * 2 + 1] = reading;
+        g_pins[i].reading = reading;
+        out_pins_count++;
+#ifdef LCD_DEBUG
+        sprintf(g_dbg_text,"%02d:%4d", i, reading);
+        GLCD.CursorTo(0,g_dbg_line_left++ % 8);
+        GLCD.Puts(g_dbg_text);
+#endif
+      }
+#ifdef WITH_SERVO
+    } else if (!servo_refresh && g_pins[i].pin_mode == PinConfig::SERVO) {
+      // Servos must be refreshed every ~40ms or they tend to forget
+      // where they are and start to jitter.
+      SetPin(i, g_pins[i].state);
+#endif  // WITH_SERVO
+    }
+  }
+  // Anything changed?
+  if (out_pins_count > 0) {
+    g_ports_msg_out.data_length = out_pins_count*2;
+    g_need_pin_state_publish = true;
+  }
+#ifdef WITH_SERVO
+  if (!servo_refresh--)
+    servo_refresh = kServoRefreshCycles;
+#endif  // WITH_SERVO
+#ifdef WITH_TIMER
+  in_sampling = false;
+#endif
+}
 
 // Arduino setup function. Called once for initialization.
 void setup()
@@ -249,6 +329,13 @@ void setup()
   g_node_handle.subscribe(sub_i2c_io);
   Wire.begin();
 #endif  // WITH_WIRE
+
+#ifdef WITH_TIMER
+  // Initialize the timer interrupt.
+  MsTimer2::set(1000 / kSampleFrequency, ReadSamples);
+  MsTimer2::start();
+#endif  // WITH TIMER
+
   //initialize the LED output pin,
   pinMode(kLedPin, OUTPUT);
   digitalWrite(kLedPin, HIGH);
@@ -266,28 +353,40 @@ void setup()
 // and over ad nauseam until we power it down or reset the board.
 void loop()
 {
-  int out_pins_count = 0;
-  for (int i = 0;i < kPinCount;i++) {
-    if (IsInputMode(g_pins[i].pin_mode)) {
-      int reading = GetPin(i);
-      if (reading != g_pins[i].reading) {
-        g_ports_msg_out.data[out_pins_count * 2 + 0] = i;
-        g_ports_msg_out.data[out_pins_count * 2 + 1] = reading;
-        g_pins[i].reading = reading;
-        out_pins_count++;
-#ifdef LCD_DEBUG
-        sprintf(g_dbg_text, "%02d:%4d", i, reading);
-        GLCD.CursorTo(0,g_dbg_line_left++ % 8);
-        GLCD.Puts(g_dbg_text);
-#endif
-      }
-    }
-  }
-  if (out_pins_count > 0) {
-    g_ports_msg_out.data_length = out_pins_count*2;
-    int status = pub_pin_state_changed.publish(&g_ports_msg_out);
-  }
+#ifndef WITH_TIMER
+  // If we don't sample on interrupt we have to try to be precise with the delay.
+  long delay_time = millis();
+  ReadSamples();
+#else
+  g_publishing = true;
+#endif  // WITH_TIMER
   // Check for new messages and send all our output messages.
+#ifdef WITH_I2C
+  if (g_need_i2c_publish) {
+    g_need_i2c_publish = false;
+    pub_i2c_response.publish(&g_i2c_msg_out);
+  }
+#endif  // WITH_I2C
+  if (g_need_pin_state_publish) {
+    g_need_pin_state_publish = false;
+    pub_pin_state_changed.publish(&g_ports_msg_out);
+  }
   g_node_handle.spinOnce();
-  delay(1000 / kSampleFrequency);
+#ifdef WITH_TIMER
+  g_publishing = false;
+  // We need to loop only a tad faster than the sampling loop and ~500Hz is the
+  // upper meaningfull boundary.
+  delay(3);
+#else
+  delay_time = millis() - delay_time;
+  // In case of overflow just take the time from 0 to now.
+  // It will be inaccurate but seldom enough.
+  if (delay_time < 0)
+    delay_time = millis();
+  delay_time = 1000 / kSampleFrequency - delay_time;
+  // If we needed too long to sample don't wait at all with the next cycle.
+  if (delay_time > 0) {
+    delay(delay_time);
+  }
+#endif
 }
