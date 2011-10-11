@@ -3,27 +3,38 @@
 #include <std_msgs/UInt8MultiArray.h>
 #include <std_msgs/UInt16MultiArray.h>
 
-#define WITH_SERVO 1
-#define WITH_WIRE 1
-#define WITH_TIMER 1
+// Using LCD_DEBUG will slow down all operations due to the time needed to
+// draw on the LCD. You should only use this for debugging and with lower
+// sampling frequencies.
 #define LCD_DEBUG 1
+// If this flag is defined servo control will be enabled. This
+// uses different interrupts for different pins on the board so
+// make sure they won't interfere with any other functions you need.
+#define WITH_SERVO 1
+// The timer uses Timer 2 on the chip and will interfere with PWM on pins 9-11
+// or servos connected to those pins.
+#define WITH_TIMER 1
+// The wire library is used for the I2C interface. If switched off all i2c
+// related topics will not function.
+#define WITH_WIRE 1
+
+#ifdef LCD_DEBUG
+#include <ks0108.h>
+#include "SystemFont5x7.h"
+#endif
 
 #ifdef WITH_SERVO
 #include <Servo.h>
-#endif
-
-#ifdef WITH_WIRE
-#include <Wire.h>
 #endif
 
 #ifdef WITH_TIMER
 #include <MsTimer2.h>
 #endif
 
-#ifdef LCD_DEBUG
-#include <ks0108.h>  // library header
-#include "SystemFont5x7.h"   // system font
+#ifdef WITH_WIRE
+#include <Wire.h>
 #endif
+
 ////////////////////////
 // Debug definitions.
 const int kLedPin = 13;
@@ -41,7 +52,11 @@ typedef struct PinConfig{
 #endif
 };
 // Number of pins to be controlled (70 on a Mega board)
+#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
 const int kPinCount = 70;
+#else
+const int kPinCount = 15;
+#endif  // Atmega[1280|2560]
 
 // Sampling frequency in Hz.
 const int kSampleFrequency = 100;
@@ -66,7 +81,7 @@ const int kMaxI2CResponseLen = 10;
 char g_dbg_text[20];
 int g_dbg_line_left = 0;
 int g_dbg_line_right = 0;
-#endif
+#endif  // LCD_DEBUG
 
 // ROS Definitions
 ros::NodeHandle g_node_handle;
@@ -118,7 +133,7 @@ void SetPin(int pin, int state) {
       g_pins[pin].servo.attach(pin);
       g_pins[pin].servo.write(constrain(g_pins[pin].state, 0, 179));
       break;
-#endif WITH_SERVO
+#endif  // WITH_SERVO
     default:  // Digital output
       digitalWrite(pin, g_pins[pin].state);
   }
@@ -161,7 +176,7 @@ ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
             pin, g_pins[pin].pin_mode, g_pins[pin].state);
     GLCD.CursorTo(12,g_dbg_line_right++ % 8);
     GLCD.Puts(g_dbg_text);
-#endif
+#endif  // LCD_DEBUG
   }
 }
 
@@ -180,7 +195,7 @@ ROS_CALLBACK(SetPins, std_msgs::UInt8MultiArray, pins_msg_in)
     sprintf(g_dbg_text, "S%02d=%d  ", pin, state);
     GLCD.CursorTo(12,g_dbg_line_right++ % 8);
     GLCD.Puts(g_dbg_text);
-#endif
+#endif  // LCD_DEBUG
   }
 }
 
@@ -227,7 +242,7 @@ ROS_CALLBACK(I2cIO, std_msgs::UInt8MultiArray, i2c_msg_in)
   sprintf(g_dbg_text, "I2C%d>%d<%d  ", address, send_len, receive_len);
   GLCD.CursorTo(12,g_dbg_line_right++ % 8);
   GLCD.Puts(g_dbg_text);
-#endif
+#endif  // LCD_DEBUG
 }
 
 ros::Subscriber sub_i2c_io("i2c_io",
@@ -242,7 +257,7 @@ void ReadSamples() {
   static bool sampling_boost = false;
   // Avoid reentrance.
   if (in_sampling || g_publishing) {
-    // Increase sampling frequency temporaryly to make sure sampling
+    // Increase sampling frequency temporarily to make sure sampling
     // will occur ASAP.
     if (!sampling_boost) {
       sampling_boost = true;
@@ -277,7 +292,7 @@ void ReadSamples() {
         sprintf(g_dbg_text,"%02d:%4d", i, reading);
         GLCD.CursorTo(0,g_dbg_line_left++ % 8);
         GLCD.Puts(g_dbg_text);
-#endif
+#endif  // LCD_DEBUG
       }
 #ifdef WITH_SERVO
     } else if (!servo_refresh && g_pins[i].pin_mode == PinConfig::SERVO) {
@@ -346,7 +361,7 @@ void setup()
   GLCD.SelectFont(System5x7);
   GLCD.CursorTo(0,0);
   GLCD.Puts("Ready.");
-#endif
+#endif  // WITH_ LCD_DEBUG
 }
 
 // The main loop. the Arduino bootloader will call this over
@@ -388,5 +403,5 @@ void loop()
   if (delay_time > 0) {
     delay(delay_time);
   }
-#endif
+#endif  // WITH_TIMER
 }
