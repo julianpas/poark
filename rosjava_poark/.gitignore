@@ -1,0 +1,6 @@
+.classpath
+.project
+dependencies.xml
+ros.properties
+/target
+
