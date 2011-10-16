@@ -149,7 +149,7 @@ void SetPin(int pin, int state) {
 ros::Publisher pub_poark_status("poark_status", &g_poark_status_msg_out);
 ros::Publisher pub_pin_state_changed("pins", &g_ports_msg_out);
 
-// The callback for the set_pins_state message.
+// The callback for the set_pins_mode message.
 ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
   for (int i = 0;i < ports_msg_in.data_length/3;i++) {
     int pin = ports_msg_in.data[i*3 + 0];
@@ -193,7 +193,7 @@ ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
   }
 }
 
-// The callback for the set_pins message.
+// The callback for the set_pins_state message.
 ROS_CALLBACK(SetPins, std_msgs::UInt8MultiArray, pins_msg_in)
   for (int i = 0;i < pins_msg_in.data_length/2;i++) {
     int pin = pins_msg_in.data[i*2 + 0];
@@ -257,11 +257,11 @@ ROS_CALLBACK(RequestStatus, std_msgs::Empty, emtry_msg_in)
 #endif
 }
 
-// The subscriber objects for set_pins_state and set_pins.
-ros::Subscriber sub_set_pins_state("set_pins_state",
+// The subscriber objects for set_pins_mode and set_pins_state.
+ros::Subscriber sub_set_pins_mode("set_pins_mode",
                                    &ports_msg_in,
                                    &SetPinsState);
-ros::Subscriber sub_set_pins("set_pins",
+ros::Subscriber sub_set_pins_state("set_pins_state",
                              &pins_msg_in,
                              &SetPins);
 ros::Subscriber sub_request_config("request_poark_config",
@@ -392,8 +392,8 @@ void setup()
 
   // Digital and analog pin interface
   g_node_handle.advertise(pub_pin_state_changed);
+  g_node_handle.subscribe(sub_set_pins_mode);
   g_node_handle.subscribe(sub_set_pins_state);
-  g_node_handle.subscribe(sub_set_pins);
   // Status interface
   g_node_handle.advertise(pub_poark_status);
   g_node_handle.subscribe(sub_request_config);

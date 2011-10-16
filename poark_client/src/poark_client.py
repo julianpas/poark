@@ -35,21 +35,21 @@ def pins_callback(data):
   rospy.loginfo("Button state changed. %d - %d"%(data.data[0], data.data[1]))
 
 # The ROS messages we need.
+pins_mode_pub = rospy.Publisher('set_pins_mode', UInt8MultiArray)
 pins_state_pub = rospy.Publisher('set_pins_state', UInt8MultiArray)
-pins_pub = rospy.Publisher('set_pins', UInt8MultiArray)
 pins_sub = rospy.Subscriber('pins', UInt16MultiArray, pins_callback)
 
-# Sends out a set_pins_message for a single pin.
+# Sends out a set_pins_state message for a single pin.
 def set_pin_state(pin, mode, initial_state):
   pins_state = UInt8MultiArray()
   pins_state.data = [pin, mode, initial_state]
-  pins_state_pub.publish(pins_state)
+  pins_mode_pub.publish(pins_state)
 
-# Sends out a set_pins message for a single pin.
+# Sends out a set_pins_state message for a single pin.
 def set_pin(pin, state):
     pins = UInt8MultiArray()
     pins.data = [pin, state]
-    pins_pub.publish(pins)
+    pins_state_pub.publish(pins)
 
 # Main loop that will turn the Arduino into XMas tree.
 def blinker():

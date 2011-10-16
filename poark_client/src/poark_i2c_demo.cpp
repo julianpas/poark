@@ -30,8 +30,8 @@ bool g_wait_for_callback = false;
 // ROS objects. Initialized in main.
 ros::NodeHandle *g_ros_node;
 ros::Publisher g_i2c_pub;
+ros::Publisher g_pins_mode_pub;
 ros::Publisher g_pins_state_pub;
-ros::Publisher g_pins_pub;
 ros::Rate *g_loop_rate;
 
 // A callback for the /pins message from a Poark server.
@@ -144,7 +144,7 @@ void I2CCallback(const std_msgs::UInt8MultiArray::ConstPtr& msg)
   }
 }
 
-// Adds a pin definition for /set_pins_state message.
+// Adds a pin definition for /set_pins_mode message.
 void AddPinDefinition(std_msgs::UInt8MultiArray* msg,
                      int pin,
                      PinMode mode,
@@ -154,7 +154,7 @@ void AddPinDefinition(std_msgs::UInt8MultiArray* msg,
   msg->data.push_back(state);
 }
 
-// Adds a pin state for /set_pins message.
+// Adds a pin state for /set_pins_state message.
 void AddPinState(std_msgs::UInt8MultiArray* msg, int pin, int state) {
   msg->data.push_back(pin);
   msg->data.push_back(state);
@@ -165,12 +165,12 @@ void ResetJoystick() {
   ROS_INFO("Sending reset signal to the Joystick.");
   std_msgs::UInt8MultiArray msg2;
   AddPinState(&msg2, kJoyResetPin, LOW);
-  g_pins_pub.publish(msg2);
+  g_pins_state_pub.publish(msg2);
   ros::spinOnce();
   ros::Duration(0.001).sleep();
   msg2.data.clear();
   AddPinState(&msg2, kJoyResetPin, HIGH);
-  g_pins_pub.publish(msg2);
+  g_pins_state_pub.publish(msg2);
   ros::spinOnce();
   ros::Duration(0.01).sleep();
   ReadJoyReg(0x0f);
@@ -190,10 +190,10 @@ int main(int argc, char **argv)
   // We are sending messages and spinning the ros loop from other functions too.
   g_ros_node = new ros::NodeHandle();
   g_loop_rate = new ros::Rate(100);
+  g_pins_mode_pub =
+      g_ros_node->advertise<std_msgs::UInt8MultiArray>("set_pins_mode", 1000);
   g_pins_state_pub =
       g_ros_node->advertise<std_msgs::UInt8MultiArray>("set_pins_state", 1000);
-  g_pins_pub =
-      g_ros_node->advertise<std_msgs::UInt8MultiArray>("set_pins", 1000);
   g_i2c_pub =
       g_ros_node->advertise<std_msgs::UInt8MultiArray>("i2c_io", 1000);
   // Those don't have to be global.
@@ -211,12 +211,12 @@ int main(int argc, char **argv)
   AddPinDefinition(&msg, kJoyInterruptPin, IN, HIGH);
   AddPinDefinition(&msg, kJoyResetPin, OUT, HIGH);
   ROS_INFO("Setting IO Pins.");
-  g_pins_state_pub.publish(msg);
+  g_pins_mode_pub.publish(msg);
   ros::spinOnce();
   // Repeat the sending because ros-serial seems to eat our first message.
   ros::Duration(0.5).sleep();
   ROS_INFO("Setting IO Pins...again.");
-  g_pins_state_pub.publish(msg);
+  g_pins_mode_pub.publish(msg);
   g_loop_rate->sleep();
 
   // Prepare the joystick.
@@ -231,7 +231,7 @@ int main(int argc, char **argv)
       msg2.data.clear();
       AddPinState(&msg2, kLed1RedPin, (count % 200 == 0 ? 245 : 255));
       AddPinState(&msg2, kBoardLedPin, count % 200 == 0 ? HIGH : LOW);
-      g_pins_pub.publish(msg2);
+      g_pins_state_pub.publish(msg2);
     }
     if (g_is_calibrated)
       ReadJoystick();
@@ -249,7 +249,7 @@ int main(int argc, char **argv)
   AddPinDefinition(&msg, kJoyResetPin, NONE, LOW);
   AddPinDefinition(&msg, kJoySwitchPin, NONE, LOW);
   ROS_INFO("Resetting all pins.");
-  g_pins_state_pub.publish(msg);
+  g_pins_mode_pub.publish(msg);
   ros::spinOnce();
   return 0;
 }
