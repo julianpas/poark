@@ -1,5 +1,6 @@
 #include <ros.h>
-#include <std_msgs/UInt8.h>
+#include <std_msgs/Empty.h>
+#include <std_msgs/String.h>
 #include <std_msgs/UInt8MultiArray.h>
 #include <std_msgs/UInt16MultiArray.h>
 
@@ -75,6 +76,8 @@ const float kFilterLambda = 0.99;
 
 // Maximal length of I2C message in bytes.
 const int kMaxI2CResponseLen = 10;
+// Maximal length of status response.
+const int kMaxPoarkStatusLength = 150;
 
 #ifdef LCD_DEBUG
 // Buffer for debug text output to the display.
@@ -89,11 +92,14 @@ ros::NodeHandle g_node_handle;
 // Output data buffer.
 unsigned int g_ports_msg_out_data[2 * kPinCount];
 byte g_i2c_msg_out_data[kMaxI2CResponseLen + 2];
+char g_poark_status_msg_out_data[kMaxPoarkStatusLength + 1];
 std_msgs::UInt16MultiArray g_ports_msg_out;
 std_msgs::UInt8MultiArray g_i2c_msg_out;
+std_msgs::String g_poark_status_msg_out;
 bool g_need_i2c_publish = false;
 // These variables will be read both from the main loop and the timer 
 // interrupt therefore they shoud be volatile.
+volatile bool g_need_poark_status_publish = false;
 volatile bool g_need_pin_state_publish = false;
 volatile bool g_publishing = false;
 
@@ -140,6 +146,7 @@ void SetPin(int pin, int state) {
 }
 
 // The communication primitives.
+ros::Publisher pub_poark_status("poark_status", &g_poark_status_msg_out);
 ros::Publisher pub_pin_state_changed("pins", &g_ports_msg_out);
 
 // The callback for the set_pins_state message.
@@ -155,7 +162,13 @@ ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
     if (g_pins[pin].pin_mode == PinConfig::SERVO &&
         !g_pins[pin].servo.attached())
       g_pins[pin].servo.attach(pin);
-#endif
+#else
+    if (g_pins[pin].pin_mode == PinConfig::SERVO) {
+      g_need_poark_status_publish = true;
+      strcpy(g_poark_status_msg_out_data,
+             "{ error: \"Servo mode is not enabled.\"; error_code: 3; }");
+    }
+#endif  // WITH_SERVO
     g_pins[pin].state = ports_msg_in.data[i*3 + 2];
     g_pins[pin].reading = ports_msg_in.data[i*3 + 2];
     if (g_pins[pin].pin_mode != PinConfig::NONE) {
@@ -189,14 +202,59 @@ ROS_CALLBACK(SetPins, std_msgs::UInt8MultiArray, pins_msg_in)
         g_pins[pin].pin_mode != PinConfig::NONE) {
       g_pins[pin].state = state;
       SetPin(pin, state);
+    } else {
+      state = 9;
+      strcpy(g_poark_status_msg_out_data,
+             "{ error: \"Pin not in output mode.\"; error_code: 2; }");
+      g_need_poark_status_publish = true;
     }
 #ifdef LCD_DEBUG
-    else state = 9;
     sprintf(g_dbg_text, "S%02d=%d  ", pin, state);
     GLCD.CursorTo(12,g_dbg_line_right++ % 8);
     GLCD.Puts(g_dbg_text);
 #endif  // LCD_DEBUG
   }
+}
+
+ROS_CALLBACK(RequestStatus, std_msgs::Empty, emtry_msg_in)
+  // Hold your breath for a huge ifdef orgy.
+  sprintf(g_poark_status_msg_out_data,
+      "{\n  board_layout: \"%s\";\n  frequency: %d;"
+      "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
+      "\n  with_i2c: %c;\n  with_timer: %c;\n  with_lcd: %c;\n}",
+#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+      "mega_layout",
+#else
+      "mini_layout",
+#endif  // ATmega[1280|2560]
+      kSampleFrequency,
+      static_cast<int>(kFilterLambda * 1000),
+#ifdef WITH_SERVO
+      '1',
+#else
+      '0',
+#endif  // WITH_SERVO
+#ifdef WITH_WIRE
+      '1',
+#else
+      '0',
+#endif  // WITH_WIRE
+#ifdef WITH_TIMER
+      '1',
+#else
+      '0',
+#endif  // WITH_TIMER
+#ifdef WITH_LCD
+      '1');
+#else
+      '0');
+#endif  // WITH_LCD
+  g_need_poark_status_publish = true;
+#ifdef LCD_DEBUG
+  sprintf(g_dbg_text, "Status");
+  GLCD.CursorTo(12,g_dbg_line_right++ % 8);
+  GLCD.Puts(g_dbg_text);
+#endif
 }
 
 // The subscriber objects for set_pins_state and set_pins.
@@ -206,6 +264,9 @@ ros::Subscriber sub_set_pins_state("set_pins_state",
 ros::Subscriber sub_set_pins("set_pins",
                              &pins_msg_in,
                              &SetPins);
+ros::Subscriber sub_request_config("request_poark_config",
+                                   &emtry_msg_in,
+                                   &RequestStatus);
 
 #ifdef WITH_WIRE
 // The publisher for i2c_response.
@@ -326,11 +387,16 @@ void setup()
   g_ports_msg_out.data = g_ports_msg_out_data;
   g_i2c_msg_out.data_length = 255;
   g_i2c_msg_out.data = g_i2c_msg_out_data;
+  g_poark_status_msg_out.data =
+      reinterpret_cast<unsigned char*>(g_poark_status_msg_out_data);
 
   // Digital and analog pin interface
   g_node_handle.advertise(pub_pin_state_changed);
   g_node_handle.subscribe(sub_set_pins_state);
   g_node_handle.subscribe(sub_set_pins);
+  // Status interface
+  g_node_handle.advertise(pub_poark_status);
+  g_node_handle.subscribe(sub_request_config);
 
   // Init all pins being neither in nor out.
   for (int i = 0;i < kPinCount;i++) {
@@ -386,6 +452,10 @@ void loop()
     g_need_pin_state_publish = false;
     pub_pin_state_changed.publish(&g_ports_msg_out);
   }
+  if (g_need_poark_status_publish) {
+    g_need_poark_status_publish = false;
+    pub_poark_status.publish(&g_poark_status_msg_out);
+  }
   g_node_handle.spinOnce();
 #ifdef WITH_TIMER
   g_publishing = false;
@@ -400,8 +470,7 @@ void loop()
     delay_time = millis();
   delay_time = 1000 / kSampleFrequency - delay_time;
   // If we needed too long to sample don't wait at all with the next cycle.
-  if (delay_time > 0) {
+  if (delay_time > 0)
     delay(delay_time);
-  }
 #endif  // WITH_TIMER
 }
