@@ -1,4 +1,6 @@
 #include "ros/ros.h"
+#include "std_msgs/Empty.h"
+#include "std_msgs/String.h"
 #include "std_msgs/UInt8MultiArray.h"
 #include "std_msgs/UInt16MultiArray.h"
 
@@ -39,6 +41,13 @@ void PinsCallback(const std_msgs::UInt16MultiArray::ConstPtr& msg)
   }
 }
 
+// A callback for the poark server message "poark_status" which is
+// used by the poark server to communicate errors and requested status
+// information.
+void StatusCallback(const std_msgs::String::ConstPtr& msg) {
+  ROS_INFO("POARK STATUS MSG: %s", msg->data.c_str());
+}
+
 // Adds a pin definition for /set_pins_mode message.
 void AddPinDefinition(std_msgs::UInt8MultiArray* msg,
                      int pin,
@@ -63,7 +72,12 @@ int main(int argc, char **argv)
       n.advertise<std_msgs::UInt8MultiArray>("set_pins_mode", 1000);
   ros::Publisher pins_state_pub =
       n.advertise<std_msgs::UInt8MultiArray>("set_pins_state", 1000);
+  ros::Publisher request_poark_config =
+      n.advertise<std_msgs::Empty>("request_poark_config", 1000);
   ros::Subscriber sub = n.subscribe("pins", 1000, PinsCallback);
+  ros::Subscriber status_sub =
+      n.subscribe("poark_status", 1000, StatusCallback);
+
   ros::Rate loop_rate(100);
 
   // Set up some pins in different modes.
@@ -85,6 +99,12 @@ int main(int argc, char **argv)
   pins_mode_pub.publish(msg);
   ros::spinOnce();
   loop_rate.sleep();
+
+  request_poark_config.publish(std_msgs::Empty());
+  ROS_INFO("Sending poark_config msg.");
+  ros::spinOnce();
+  loop_rate.sleep();
+
   // Start the main loop.
   int count = 0;
   while (ros::ok())
