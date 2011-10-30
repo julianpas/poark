@@ -10,6 +10,11 @@ const bool LOW = false;
 const bool HIGH = true;
 
 enum PinMode { OUT, IN, ANALOG, ANALOG_FILT, PWM_MODE, SERVO, NONE=0xff };
+enum ConfigCommand { REQUEST_CONFIG=0x00,
+                     SET_FREQUENCY,
+                     SET_CONTINUOUS_MODE,
+                     SET_FILTER_LAMBDA,
+                     ERROR=0xff };
 
 const int kPinCount = 70;
 const int kServoControlPin = 54;
@@ -74,6 +79,8 @@ int main(int argc, char **argv)
       n.advertise<std_msgs::UInt8MultiArray>("set_pins_state", 1000);
   ros::Publisher request_poark_config =
       n.advertise<std_msgs::Empty>("request_poark_config", 1000);
+  ros::Publisher set_poark_config =
+      n.advertise<std_msgs::UInt16MultiArray>("set_poark_config", 1000);
   ros::Subscriber sub = n.subscribe("pins", 1000, PinsCallback);
   ros::Subscriber status_sub =
       n.subscribe("poark_status", 1000, StatusCallback);
@@ -100,8 +107,19 @@ int main(int argc, char **argv)
   ros::spinOnce();
   loop_rate.sleep();
 
+  std_msgs::UInt16MultiArray msg16;
+  msg16.data.clear();
+  msg16.data.push_back(SET_FREQUENCY);
+  msg16.data.push_back(100);
+  msg16.data.push_back(SET_CONTINUOUS_MODE);
+  msg16.data.push_back(true);
+  set_poark_config.publish(msg16);
+  ROS_INFO("Sending set_poark_config msg.");
+  ros::spinOnce();
+  loop_rate.sleep();
+
   request_poark_config.publish(std_msgs::Empty());
-  ROS_INFO("Sending poark_config msg.");
+  ROS_INFO("Sending request_poark_config msg.");
   ros::spinOnce();
   loop_rate.sleep();
 

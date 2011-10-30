@@ -77,25 +77,33 @@ const int kPinCount = 70;
 const int kPinCount = 15;
 #endif  // Atmega[1280|2560]
 
+// True if the server works in continuous mode (send back values each cycle)
+int g_continuous_mode = false;
+
+enum ConfigCommand { REQUEST_CONFIG=0x00,
+                     SET_FREQUENCY,
+                     SET_CONTINUOUS_MODE,
+                     SET_FILTER_LAMBDA };
+
 // Sampling frequency in Hz.
-const int kSampleFrequency = 100;
+int g_sample_frequency = 100;
 // Maximal sample cycles between servo value refresh. The servos need
 // refreshing every 40ms or so or they tend to forget their position and
 // start to jitter. In order to have proper servo control make sure your
 // sampling frequency is not lower than 25Hz.
-const int kServoRefreshCycles = 35 * kSampleFrequency / 1000;
+int g_servo_refresh_cycle = (35 * g_sample_frequency) / 1000;
 
 // The inner pin representation and status.
 PinConfig g_pins[kPinCount];
 
 // The lambda, forgetting factor for analog data filtering
 // (~100 samples window)
-const float kFilterLambda = 0.99;
+float g_filter_lambda = 0.99;
 
 // Maximal length of I2C message in bytes.
 const int kMaxI2CResponseLen = 10;
 // Maximal length of status response.
-const int kMaxPoarkStatusLength = 150;
+const int kMaxPoarkStatusLength = 250;
 
 #ifdef LCD_DEBUG
 // Buffer for debug text output to the display.
@@ -149,7 +157,7 @@ int GetPin(int pin) {
       if (filter_data == -1.)
         filter_data = reading;
       else
-        filter_data = (1-kFilterLambda)*reading + kFilterLambda*filter_data;
+        filter_data = (1-g_filter_lambda)*reading + g_filter_lambda*filter_data;
       return static_cast<int>(filter_data + 0.5);
     }
     default: {  // Digital input
@@ -239,6 +247,7 @@ void RequestStatus(const std_msgs::Empty& empty_msg_in) {
   // Note, this will overwrite any already queued messages!
   sprintf(g_poark_status_msg_out_data,
       "{\n  board_layout: \"%s\";\n  frequency: %d;"
+      "\n  continuous mode: %d;"
       "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
       "\n  with_i2c: %c;\n  with_timer: %c;\n  lcd_debug: %c;\n}",
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
@@ -246,8 +255,9 @@ void RequestStatus(const std_msgs::Empty& empty_msg_in) {
 #else
       "mini_layout",
 #endif  // ATmega[1280|2560]
-      kSampleFrequency,
-      static_cast<int>(kFilterLambda * 1000),
+      g_sample_frequency,
+      g_continuous_mode,
+      static_cast<int>(g_filter_lambda * 1000),
 #ifdef WITH_SERVO
       '1',
 #else
@@ -318,6 +328,46 @@ ros::Subscriber<std_msgs::UInt8MultiArray> sub_i2c_io("i2c_io", I2cIO);
 
 #endif  // WITH_WIRE
 
+void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
+  int index = 0;
+
+  while (index < config_msg_in.data_length) {
+    byte command = config_msg_in.data[index++];
+    if (command != REQUEST_CONFIG && index == config_msg_in.data_length)
+      return RequestStatusMsg("{ error: \"Not enough configure arguments.\";"
+                              " error_code: 4; }");
+    switch (command) {
+      case REQUEST_CONFIG:
+        RequestStatus(std_msgs::Empty());
+        break;
+      case SET_FREQUENCY:
+        g_sample_frequency = config_msg_in.data[index++];
+        g_servo_refresh_cycle = (35 * g_sample_frequency) / 1000;
+        MsTimer2::set(1000 / g_sample_frequency, ReadSamples);
+        MsTimer2::start();
+        LCD_DEBUG_MSG_RIGHT("freq:%3d   ", g_sample_frequency);
+        break;
+      case SET_CONTINUOUS_MODE:
+        g_continuous_mode = config_msg_in.data[index++] != 0;
+        LCD_DEBUG_MSG_RIGHT("Cnt mode: %d", g_sample_frequency);
+        break;
+      case SET_FILTER_LAMBDA:
+        g_filter_lambda = config_msg_in.data[index++]/1000.;
+        LCD_DEBUG_MSG_RIGHT("Lambda: %d3",
+                            static_cast<int>(1000*g_filter_lambda));
+        break;
+      default:
+        RequestStatusMsg(
+            "{ error: \"Unknown configure command.\"; error_code: 5; }");
+        LCD_DEBUG_MSG_RIGHT("ERROR: conf");
+        break;
+    }
+  }
+}
+
+ros::Subscriber<std_msgs::UInt16MultiArray> sub_set_config("set_poark_config",
+																													 SetConfig);
+
 void ReadSamples() {
 #ifdef WITH_TIMER
   static bool in_sampling = false;
@@ -336,7 +386,7 @@ void ReadSamples() {
   in_sampling = true;
   if (sampling_boost) {
     // If in sampling boost go back to normal mode.
-    MsTimer2::set(1000 / kSampleFrequency, ReadSamples);
+    MsTimer2::set(1000 / g_sample_frequency, ReadSamples);
     MsTimer2::start();
     sampling_boost = false;
   }
@@ -372,7 +422,7 @@ void ReadSamples() {
   }
 #ifdef WITH_SERVO
   if (!servo_refresh--)
-    servo_refresh = kServoRefreshCycles;
+    servo_refresh = g_servo_refresh_cycle;
 #endif  // WITH_SERVO
 #ifdef WITH_TIMER
   in_sampling = false;
@@ -398,6 +448,7 @@ void setup()
   // Status interface
   g_node_handle.advertise(pub_poark_status);
   g_node_handle.subscribe(sub_request_config);
+  g_node_handle.subscribe(sub_set_config);
 
   // Init all pins being neither in nor out.
   for (int i = 0;i < kPinCount;i++) {
@@ -414,7 +465,7 @@ void setup()
 
 #ifdef WITH_TIMER
   // Initialize the timer interrupt.
-  MsTimer2::set(1000 / kSampleFrequency, ReadSamples);
+  MsTimer2::set(1000 / g_sample_frequency, ReadSamples);
   MsTimer2::start();
 #endif  // WITH TIMER
 
@@ -469,7 +520,7 @@ void loop()
   // It will be inaccurate but seldom enough.
   if (delay_time < 0)
     delay_time = millis();
-  delay_time = 1000 / kSampleFrequency - delay_time;
+  delay_time = 1000 / g_sample_frequency - delay_time;
   // If we needed too long to sample don't wait at all with the next cycle.
   if (delay_time > 0)
     delay(delay_time);
