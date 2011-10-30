@@ -14,11 +14,15 @@ enum ConfigCommand { REQUEST_CONFIG=0x00,
                      SET_FREQUENCY,
                      SET_CONTINUOUS_MODE,
                      SET_FILTER_LAMBDA,
+                     SET_TIMESTAMP,
                      ERROR=0xff };
 
 const int kPinCount = 70;
 const int kServoControlPin = 54;
 const int kServoPin = 7;
+
+const int kTimestampPin  = 0x8000;
+const int kTimestampMask = 0x7FFF;
 
 // Variables to control the update of the servo position.  Keep
 // volatile as they are changed asynchronously in a call back
@@ -36,6 +40,13 @@ void PinsCallback(const std_msgs::UInt16MultiArray::ConstPtr& msg)
   for (size_t i = 0;i < msg->data.size()/2;i++) {
     int pin = static_cast<int>(msg->data[i*2]);
     int value = static_cast<int>(msg->data[i*2 + 1]);
+    if (pin&kTimestampPin) {
+      unsigned long t =
+          (static_cast<unsigned long>(pin&kTimestampMask) << 16) + value;
+      ROS_INFO("Time: %ld", t);
+      continue;
+    }
+
     ROS_INFO("Pin %d : %d", pin, value);
     if (pin == kServoControlPin) {
       // The servo control should be an angle between 0 and 180 degrees.
@@ -113,6 +124,8 @@ int main(int argc, char **argv)
   msg16.data.push_back(100);
   msg16.data.push_back(SET_CONTINUOUS_MODE);
   msg16.data.push_back(true);
+  msg16.data.push_back(SET_TIMESTAMP);
+  msg16.data.push_back(true);
   set_poark_config.publish(msg16);
   ROS_INFO("Sending set_poark_config msg.");
   ros::spinOnce();
@@ -147,7 +160,7 @@ int main(int argc, char **argv)
     ros::spinOnce();
     loop_rate.sleep();
     ++count;
-    if (count > 30000)
+    if (count > 3000)
       break;
   }
 

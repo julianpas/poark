@@ -83,7 +83,8 @@ int g_continuous_mode = false;
 enum ConfigCommand { REQUEST_CONFIG=0x00,
                      SET_FREQUENCY,
                      SET_CONTINUOUS_MODE,
-                     SET_FILTER_LAMBDA };
+                     SET_FILTER_LAMBDA,
+                     SET_TIMESTAMP };
 
 // Sampling frequency in Hz.
 int g_sample_frequency = 100;
@@ -95,6 +96,13 @@ int g_servo_refresh_cycle = (35 * g_sample_frequency) / 1000;
 
 // The inner pin representation and status.
 PinConfig g_pins[kPinCount];
+
+// Indicate if all pins messages should be timed
+bool g_timestamp = 0;
+// Faked pin used to deliver time stamps.
+const int kTimestampPin  = 0x8000;
+// Time stamp mask
+const int kTimestampMask = 0x7FFF;
 
 // The lambda, forgetting factor for analog data filtering
 // (~100 samples window)
@@ -115,8 +123,8 @@ int g_dbg_line_right = 0;
 // ROS Definitions
 ros::NodeHandle g_node_handle;
 
-// Output data buffer.
-unsigned int g_ports_msg_out_data[2 * kPinCount];
+// Output data buffer (+2 needed to include timestamp).
+unsigned int g_ports_msg_out_data[2 * kPinCount + 2];
 byte g_i2c_msg_out_data[kMaxI2CResponseLen + 2];
 char g_poark_status_msg_out_data[kMaxPoarkStatusLength + 1];
 std_msgs::UInt16MultiArray g_ports_msg_out;
@@ -247,7 +255,7 @@ void RequestStatus(const std_msgs::Empty& empty_msg_in) {
   // Note, this will overwrite any already queued messages!
   sprintf(g_poark_status_msg_out_data,
       "{\n  board_layout: \"%s\";\n  frequency: %d;"
-      "\n  continuous mode: %d;"
+      "\n  continuous mode: %d;\n  timestamp: %d;"
       "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
       "\n  with_i2c: %c;\n  with_timer: %c;\n  lcd_debug: %c;\n}",
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
@@ -257,6 +265,7 @@ void RequestStatus(const std_msgs::Empty& empty_msg_in) {
 #endif  // ATmega[1280|2560]
       g_sample_frequency,
       g_continuous_mode,
+      g_timestamp,
       static_cast<int>(g_filter_lambda * 1000),
 #ifdef WITH_SERVO
       '1',
@@ -345,7 +354,7 @@ void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
         g_servo_refresh_cycle = (35 * g_sample_frequency) / 1000;
         MsTimer2::set(1000 / g_sample_frequency, ReadSamples);
         MsTimer2::start();
-        LCD_DEBUG_MSG_RIGHT("freq:%3d   ", g_sample_frequency);
+        LCD_DEBUG_MSG_RIGHT("freq: %3d  ", g_sample_frequency);
         break;
       case SET_CONTINUOUS_MODE:
         g_continuous_mode = config_msg_in.data[index++] != 0;
@@ -355,6 +364,10 @@ void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
         g_filter_lambda = config_msg_in.data[index++]/1000.;
         LCD_DEBUG_MSG_RIGHT("Lambda: %d3",
                             static_cast<int>(1000*g_filter_lambda));
+        break;
+      case SET_TIMESTAMP:
+        g_timestamp = (config_msg_in.data[index++] != 0);
+        LCD_DEBUG_MSG_RIGHT("t stamp: %d ", static_cast<int>(g_timestamp));
         break;
       default:
         RequestStatusMsg(
@@ -366,7 +379,7 @@ void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
 }
 
 ros::Subscriber<std_msgs::UInt16MultiArray> sub_set_config("set_poark_config",
-																													 SetConfig);
+                                                           SetConfig);
 
 void ReadSamples() {
 #ifdef WITH_TIMER
@@ -396,13 +409,22 @@ void ReadSamples() {
   static byte servo_refresh = 0;
 #endif  // WITH_SERVO
 
+  unsigned int* msg_pointer = g_ports_msg_out.data;
   int out_pins_count = 0;
+  if (g_timestamp) {
+    unsigned long t = millis();
+    msg_pointer[0] =
+        kTimestampPin | static_cast<unsigned>((t>>16)&kTimestampMask);
+    msg_pointer[1] = static_cast<unsigned>(t&0xFFFF);
+    msg_pointer += 2;
+  }
   for (int i = 0;i < kPinCount;i++) {
     if (IsInputMode(g_pins[i].pin_mode)) {
       int reading = GetPin(i);
-      if (reading != g_pins[i].reading) {
-        g_ports_msg_out.data[out_pins_count * 2 + 0] = i;
-        g_ports_msg_out.data[out_pins_count * 2 + 1] = reading;
+      if (g_continuous_mode || reading != g_pins[i].reading) {
+        msg_pointer[0] = i;
+        msg_pointer[1] = reading;
+        msg_pointer += 2;
         g_pins[i].reading = reading;
         out_pins_count++;
         LCD_DEBUG_MSG_LEFT("%02d:%4d", i, reading);
@@ -417,7 +439,7 @@ void ReadSamples() {
   }
   // Anything changed?
   if (out_pins_count > 0) {
-    g_ports_msg_out.data_length = out_pins_count*2;
+    g_ports_msg_out.data_length = msg_pointer - g_ports_msg_out.data;
     g_need_pin_state_publish = true;
   }
 #ifdef WITH_SERVO
