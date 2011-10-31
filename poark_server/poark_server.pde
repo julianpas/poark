@@ -221,7 +221,7 @@ ROS_CALLBACK(RequestStatus, std_msgs::Empty, emtry_msg_in)
   sprintf(g_poark_status_msg_out_data,
       "{\n  board_layout: \"%s\";\n  frequency: %d;"
       "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
-      "\n  with_i2c: %c;\n  with_timer: %c;\n  with_lcd: %c;\n}",
+      "\n  with_i2c: %c;\n  with_timer: %c;\n  lcd_debug: %c;\n}",
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
       "mega_layout",
 #else
@@ -244,11 +244,11 @@ ROS_CALLBACK(RequestStatus, std_msgs::Empty, emtry_msg_in)
 #else
       '0',
 #endif  // WITH_TIMER
-#ifdef WITH_LCD
+#ifdef LCD_DEBUG
       '1');
 #else
       '0');
-#endif  // WITH_LCD
+#endif  // LCD_DEBUG
   g_need_poark_status_publish = true;
 #ifdef LCD_DEBUG
   sprintf(g_dbg_text, "Status");
