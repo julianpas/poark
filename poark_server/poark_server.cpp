@@ -107,7 +107,16 @@ volatile bool g_publishing = false;
 
 void ReadSamples();
 
-bool IsInputMode(PinConfig::PinMode mode) {
+inline void RequestStatusMsg(const char* msg) {
+  // This test is to protect against strcpy-ing with the same source and
+  // destination which is undefined.  If inlined, this should be optimized
+  // away in most common cases.
+  if (msg != g_poark_status_msg_out_data)
+    strcpy(g_poark_status_msg_out_data, msg);
+  g_need_poark_status_publish = true;
+}
+
+inline bool IsInputMode(PinConfig::PinMode mode) {
   return (mode == PinConfig::IN ||
           mode == PinConfig::ANALOG ||
           mode == PinConfig::ANALOG_FILT);
@@ -167,11 +176,9 @@ void SetPinsState(const std_msgs::UInt8MultiArray& ports_msg_in) {
         !g_pins[pin].servo.attached())
       g_pins[pin].servo.attach(pin);
 #else
-    if (g_pins[pin].pin_mode == PinConfig::SERVO) {
-      g_need_poark_status_publish = true;
-      strcpy(g_poark_status_msg_out_data,
-             "{ error: \"Servo mode is not enabled.\"; error_code: 3; }");
-    }
+    if (g_pins[pin].pin_mode == PinConfig::SERVO)
+      RequestStatusMsg(
+          "{ error: \"Servo mode is not enabled.\"; error_code: 3; }");
 #endif  // WITH_SERVO
     g_pins[pin].state = ports_msg_in.data[i*3 + 2];
     g_pins[pin].reading = ports_msg_in.data[i*3 + 2];
@@ -208,9 +215,8 @@ void SetPins(const std_msgs::UInt8MultiArray& pins_msg_in) {
       SetPin(pin, state);
     } else {
       state = 9;
-      strcpy(g_poark_status_msg_out_data,
-             "{ error: \"Pin not in output mode.\"; error_code: 2; }");
-      g_need_poark_status_publish = true;
+      RequestStatusMsg(
+          "{ error: \"Pin not in output mode.\"; error_code: 2; }");
     }
 #ifdef LCD_DEBUG
     sprintf(g_dbg_text, "S%02d=%d  ", pin, state);
@@ -222,6 +228,7 @@ void SetPins(const std_msgs::UInt8MultiArray& pins_msg_in) {
 
 void RequestStatus(const std_msgs::Empty& empty_msg_in) {
   // Hold your breath for a huge ifdef orgy.
+  // Note, this will overwrite any already queued messages!
   sprintf(g_poark_status_msg_out_data,
       "{\n  board_layout: \"%s\";\n  frequency: %d;"
       "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
@@ -253,7 +260,7 @@ void RequestStatus(const std_msgs::Empty& empty_msg_in) {
 #else
       '0');
 #endif  // LCD_DEBUG
-  g_need_poark_status_publish = true;
+  RequestStatusMsg(g_poark_status_msg_out_data);
 #ifdef LCD_DEBUG
   sprintf(g_dbg_text, "Status");
   GLCD.CursorTo(12,g_dbg_line_right++ % 8);
