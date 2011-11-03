@@ -150,7 +150,7 @@ ros::Publisher pub_poark_status("poark_status", &g_poark_status_msg_out);
 ros::Publisher pub_pin_state_changed("pins", &g_ports_msg_out);
 
 // The callback for the set_pins_mode message.
-ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
+void SetPinsState(const std_msgs::UInt8MultiArray& ports_msg_in) {
   for (int i = 0;i < ports_msg_in.data_length/3;i++) {
     int pin = ports_msg_in.data[i*3 + 0];
     g_pins[pin].pin_mode =
@@ -194,7 +194,7 @@ ROS_CALLBACK(SetPinsState, std_msgs::UInt8MultiArray, ports_msg_in)
 }
 
 // The callback for the set_pins_state message.
-ROS_CALLBACK(SetPins, std_msgs::UInt8MultiArray, pins_msg_in)
+void SetPins(const std_msgs::UInt8MultiArray& pins_msg_in) {
   for (int i = 0;i < pins_msg_in.data_length/2;i++) {
     int pin = pins_msg_in.data[i*2 + 0];
     int state = pins_msg_in.data[i*2 + 1];
@@ -216,7 +216,7 @@ ROS_CALLBACK(SetPins, std_msgs::UInt8MultiArray, pins_msg_in)
   }
 }
 
-ROS_CALLBACK(RequestStatus, std_msgs::Empty, emtry_msg_in)
+void RequestStatus(const std_msgs::Empty& empty_msg_in) {
   // Hold your breath for a huge ifdef orgy.
   sprintf(g_poark_status_msg_out_data,
       "{\n  board_layout: \"%s\";\n  frequency: %d;"
@@ -258,22 +258,19 @@ ROS_CALLBACK(RequestStatus, std_msgs::Empty, emtry_msg_in)
 }
 
 // The subscriber objects for set_pins_mode and set_pins_state.
-ros::Subscriber sub_set_pins_mode("set_pins_mode",
-                                   &ports_msg_in,
-                                   &SetPinsState);
-ros::Subscriber sub_set_pins_state("set_pins_state",
-                             &pins_msg_in,
-                             &SetPins);
-ros::Subscriber sub_request_config("request_poark_config",
-                                   &emtry_msg_in,
-                                   &RequestStatus);
+ros::Subscriber<std_msgs::UInt8MultiArray> sub_set_pins_mode("set_pins_mode",
+                                                             SetPinsState);
+ros::Subscriber<std_msgs::UInt8MultiArray> sub_set_pins_state("set_pins_state",
+                                                              SetPins);
+ros::Subscriber<std_msgs::Empty> sub_request_config("request_poark_config",
+                                                    RequestStatus);
 
 #ifdef WITH_WIRE
 // The publisher for i2c_response.
 ros::Publisher pub_i2c_response("i2c_response", &g_i2c_msg_out);
 
 // The callback for the i2c_io message.
-ROS_CALLBACK(I2cIO, std_msgs::UInt8MultiArray, i2c_msg_in)
+void I2cIO(const std_msgs::UInt8MultiArray& i2c_msg_in) {
   int address = i2c_msg_in.data[0];
   int send_len = i2c_msg_in.data_length - 3;
   int receive_len =
@@ -306,9 +303,7 @@ ROS_CALLBACK(I2cIO, std_msgs::UInt8MultiArray, i2c_msg_in)
 #endif  // LCD_DEBUG
 }
 
-ros::Subscriber sub_i2c_io("i2c_io",
-                           &i2c_msg_in,
-                           &I2cIO);
+ros::Subscriber<std_msgs::UInt8MultiArray> sub_i2c_io("i2c_io", I2cIO);
 
 #endif  // WITH_WIRE
 
@@ -387,8 +382,7 @@ void setup()
   g_ports_msg_out.data = g_ports_msg_out_data;
   g_i2c_msg_out.data_length = 255;
   g_i2c_msg_out.data = g_i2c_msg_out_data;
-  g_poark_status_msg_out.data =
-      reinterpret_cast<unsigned char*>(g_poark_status_msg_out_data);
+  g_poark_status_msg_out.data = g_poark_status_msg_out_data;
 
   // Digital and analog pin interface
   g_node_handle.advertise(pub_pin_state_changed);
