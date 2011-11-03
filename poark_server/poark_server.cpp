@@ -24,7 +24,23 @@
 #ifdef LCD_DEBUG
 #include <ks0108.h>
 #include "SystemFont5x7.h"
-#endif
+
+#define LCD_DEBUG_MSG_LEFT(...) \
+    sprintf(g_dbg_text, __VA_ARGS__);\
+    GLCD.CursorTo(0, g_dbg_line_left++ % 8);\
+    GLCD.Puts(g_dbg_text)
+
+#define LCD_DEBUG_MSG_RIGHT(...) \
+    sprintf(g_dbg_text, __VA_ARGS__);\
+    GLCD.CursorTo(12, g_dbg_line_right++ % 8);\
+    GLCD.Puts(g_dbg_text)
+
+#else  // LCD_DEBUG
+
+#define LCD_DEBUG_MSG_LEFT(...)
+#define LCD_DEBUG_MSG_RIGHT(...)
+
+#endif  // LCD_DEBUG
 
 #ifdef WITH_SERVO
 #include <Servo.h>
@@ -195,12 +211,8 @@ void SetPinsState(const std_msgs::UInt8MultiArray& ports_msg_in) {
       // We have to set the state for both new in and out pins.
       SetPin(pin, g_pins[pin].state);
     }
-#ifdef LCD_DEBUG
-    sprintf(g_dbg_text, "P%02d:%d=%d",
-            pin, g_pins[pin].pin_mode, g_pins[pin].state);
-    GLCD.CursorTo(12,g_dbg_line_right++ % 8);
-    GLCD.Puts(g_dbg_text);
-#endif  // LCD_DEBUG
+    LCD_DEBUG_MSG_RIGHT("P%02d:%d=%d",
+                        pin, g_pins[pin].pin_mode, g_pins[pin].state);
   }
 }
 
@@ -218,11 +230,7 @@ void SetPins(const std_msgs::UInt8MultiArray& pins_msg_in) {
       RequestStatusMsg(
           "{ error: \"Pin not in output mode.\"; error_code: 2; }");
     }
-#ifdef LCD_DEBUG
-    sprintf(g_dbg_text, "S%02d=%d  ", pin, state);
-    GLCD.CursorTo(12,g_dbg_line_right++ % 8);
-    GLCD.Puts(g_dbg_text);
-#endif  // LCD_DEBUG
+    LCD_DEBUG_MSG_RIGHT("S%02d=%d  ", pin, state);
   }
 }
 
@@ -261,11 +269,7 @@ void RequestStatus(const std_msgs::Empty& empty_msg_in) {
       '0');
 #endif  // LCD_DEBUG
   RequestStatusMsg(g_poark_status_msg_out_data);
-#ifdef LCD_DEBUG
-  sprintf(g_dbg_text, "Status");
-  GLCD.CursorTo(12,g_dbg_line_right++ % 8);
-  GLCD.Puts(g_dbg_text);
-#endif
+  LCD_DEBUG_MSG_RIGHT("Status");
 }
 
 // The subscriber objects for set_pins_mode and set_pins_state.
@@ -307,11 +311,7 @@ void I2cIO(const std_msgs::UInt8MultiArray& i2c_msg_in) {
     }
   }
   g_need_i2c_publish = true;
-#ifdef LCD_DEBUG
-  sprintf(g_dbg_text, "I2C%d>%d<%d  ", address, send_len, receive_len);
-  GLCD.CursorTo(12,g_dbg_line_right++ % 8);
-  GLCD.Puts(g_dbg_text);
-#endif  // LCD_DEBUG
+  LCD_DEBUG_MSG_RIGHT("I2C%d>%d<%d  ", address, send_len, receive_len);
 }
 
 ros::Subscriber<std_msgs::UInt8MultiArray> sub_i2c_io("i2c_io", I2cIO);
@@ -355,11 +355,7 @@ void ReadSamples() {
         g_ports_msg_out.data[out_pins_count * 2 + 1] = reading;
         g_pins[i].reading = reading;
         out_pins_count++;
-#ifdef LCD_DEBUG
-        sprintf(g_dbg_text,"%02d:%4d", i, reading);
-        GLCD.CursorTo(0,g_dbg_line_left++ % 8);
-        GLCD.Puts(g_dbg_text);
-#endif  // LCD_DEBUG
+        LCD_DEBUG_MSG_LEFT("%02d:%4d", i, reading);
       }
 #ifdef WITH_SERVO
     } else if (!servo_refresh && g_pins[i].pin_mode == PinConfig::SERVO) {
