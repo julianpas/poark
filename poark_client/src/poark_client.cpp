@@ -15,6 +15,7 @@ enum ConfigCommand { REQUEST_CONFIG=0x00,
                      SET_CONTINUOUS_MODE,
                      SET_FILTER_LAMBDA,
                      SET_TIMESTAMP,
+                     SET_ANALOG_REF,
                      ERROR=0xff };
 
 const int kPinCount = 70;
@@ -116,7 +117,8 @@ int main(int argc, char **argv)
   ROS_INFO("Sending /set_pins_mode msg.");
   pins_mode_pub.publish(msg);
   ros::spinOnce();
-  loop_rate.sleep();
+  for (int i = 0; i < 20; ++i)
+    loop_rate.sleep();
 
   std_msgs::UInt16MultiArray msg16;
   msg16.data.clear();
@@ -126,15 +128,19 @@ int main(int argc, char **argv)
   msg16.data.push_back(true);
   msg16.data.push_back(SET_TIMESTAMP);
   msg16.data.push_back(true);
+  msg16.data.push_back(SET_ANALOG_REF);
+  msg16.data.push_back(3);  // INTERNAL2V56
   set_poark_config.publish(msg16);
   ROS_INFO("Sending set_poark_config msg.");
   ros::spinOnce();
-  loop_rate.sleep();
+  for (int i = 0; i < 20; ++i)
+    loop_rate.sleep();
 
   request_poark_config.publish(std_msgs::Empty());
   ROS_INFO("Sending request_poark_config msg.");
   ros::spinOnce();
-  loop_rate.sleep();
+  for (int i = 0; i < 20; ++i)
+    loop_rate.sleep();
 
   // Start the main loop.
   int count = 0;

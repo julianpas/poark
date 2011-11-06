@@ -84,7 +84,8 @@ enum ConfigCommand { REQUEST_CONFIG=0x00,
                      SET_FREQUENCY,
                      SET_CONTINUOUS_MODE,
                      SET_FILTER_LAMBDA,
-                     SET_TIMESTAMP };
+                     SET_TIMESTAMP,
+                     SET_ANALOG_REF };
 
 // Sampling frequency in Hz.
 int g_sample_frequency = 100;
@@ -103,6 +104,9 @@ bool g_timestamp = 0;
 const int kTimestampPin  = 0x8000;
 // Time stamp mask
 const int kTimestampMask = 0x7FFF;
+
+// Indicator of the reference used for the A/D-Converter
+byte g_analog_ref = DEFAULT;
 
 // The lambda, forgetting factor for analog data filtering
 // (~100 samples window)
@@ -255,7 +259,8 @@ void RequestStatus(const std_msgs::Empty& empty_msg_in) {
   // Note, this will overwrite any already queued messages!
   sprintf(g_poark_status_msg_out_data,
       "{\n  board_layout: \"%s\";\n  frequency: %d;"
-      "\n  continuous mode: %d;\n  timestamp: %d;"
+      "\n  continuous mode: %d;\n  analog_ref: %d;"
+      "\n  timestamp: %d;"
       "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
       "\n  with_i2c: %c;\n  with_timer: %c;\n  lcd_debug: %c;\n}",
 #if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
@@ -265,6 +270,7 @@ void RequestStatus(const std_msgs::Empty& empty_msg_in) {
 #endif  // ATmega[1280|2560]
       g_sample_frequency,
       g_continuous_mode,
+      g_analog_ref,
       g_timestamp,
       static_cast<int>(g_filter_lambda * 1000),
 #ifdef WITH_SERVO
@@ -368,6 +374,11 @@ void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
       case SET_TIMESTAMP:
         g_timestamp = (config_msg_in.data[index++] != 0);
         LCD_DEBUG_MSG_RIGHT("t stamp: %d ", static_cast<int>(g_timestamp));
+        break;
+      case SET_ANALOG_REF:
+        g_analog_ref = config_msg_in.data[index++];
+        analogReference(g_analog_ref);
+        LCD_DEBUG_MSG_RIGHT("ARef: %d    ", static_cast<int>(g_analog_ref));
         break;
       default:
         RequestStatusMsg(
