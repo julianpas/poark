@@ -4,7 +4,7 @@
      poark_client
 
   </description>
-  <author>Julian Pastarmov</author>
+  <author>Julian Pastarmov, Gustaf Hendeby</author>
   <license>BSD</license>
   <review status="unreviewed" notes=""/>
   <url>http://ros.org/wiki/poark_client</url>

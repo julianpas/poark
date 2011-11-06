@@ -1,0 +1,14 @@
+<package>
+  <description brief="poark_server">
+
+     poark_server
+
+  </description>
+  <author>Gustaf Hendeby, Julian Pastarmov</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/poark_server</url>
+  <depend package="rosserial_arduino"/>
+  <depend package="std_msgs"/>
+
+</package>
