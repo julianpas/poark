@@ -23,6 +23,7 @@ import org.ros.node.DefaultNodeFactory;
 import org.ros.node.Node;
 import org.ros.node.NodeConfiguration;
 import org.ros.node.NodeMain;
+import org.ros.poark.I2CResponseListener;
 import org.ros.poark.Poark;
 import org.ros.poark.PoarkClient;
 import org.ros.poark.PinChangeListener;
@@ -127,11 +128,10 @@ public class DemoKit implements NodeMain {
   }
 
   @Override
-  public void main(NodeConfiguration configuration) {
+  public void main(Node node) {
     Preconditions.checkState(node == null);
-    Preconditions.checkNotNull(configuration);
+    this.node = node;
     try {
-      node = new DefaultNodeFactory().newNode("basic_poark_client", configuration);
       log = node.getLog();
       // Attach the client to the node and add some pin listeners.
       poarkClient = new PoarkClient(Poark.BoardLayout.MegaLayout, node);
@@ -167,16 +167,15 @@ public class DemoKit implements NodeMain {
       // Set up the servo.
       poarkClient.setPinMode(kServo1, Poark.SERVO, (byte)0);
 
-      // Sample I2C transfer.
-      //poarkClient.AddI2CResponseListener((byte)0x40, new I2CResponseListener() {
-      //  @Override
-      //  public void onI2CResponse(byte address, byte token, byte[] data) {
-      //    log.info("I2C Got : " + token + " - " + data[0]);
-      //  }
-      //});
-      //poarkClient.I2CTransfer((byte)0x40, (byte)123, new byte[] {(byte)0x0f}, 1);
-      // Some I2C fun.
       Thread.sleep(1000);  // Dramatic pause...
+      // Sample I2C transfer.
+      poarkClient.addI2CResponseListener((byte)0x40, new I2CResponseListener() {
+        @Override
+        public void onI2CResponse(byte address, byte token, byte[] data) {
+          log.info("I2C Got : " + token + " - " + data[0]);
+        }
+      });
+      poarkClient.performI2CTransfer((byte)0x40, (byte)123, new byte[] {(byte)0x0f}, 1);
       log.info("Let's start");
       while (true) {
         poarkClient.setPinState(kServo1, (byte)servoPosition);

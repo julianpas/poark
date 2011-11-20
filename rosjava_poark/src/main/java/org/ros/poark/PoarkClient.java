@@ -49,7 +49,6 @@ public class PoarkClient {
      */
     @Override
     public void onNewMessage(UInt16MultiArray message) {
-      //log.info("pins message received with : " + message.data.length/2 + " pins.");
       Collection<PinChangeListener> globalListeners =
           pinsListenerClients.get((byte)-1);
       for (int i = 0;i < message.data.length / 2;++i) {
@@ -75,9 +74,6 @@ public class PoarkClient {
      */
     @Override
     public void onNewMessage(UInt8MultiArray message) {
-      //log.info("i2c message received addr : " + message.data[0] +
-      //         " token : " + message.data[1] + " bytes." +
-      //         " length : " + (message.data.length - 1) + " bytes.");
       byte[] data = new byte[message.data.length - 2];
       System.arraycopy(message.data, 2, data, 0, data.length);
       for (I2CResponseListener entry : listenerClients.get((byte)-1))
@@ -118,22 +114,20 @@ public class PoarkClient {
    * {@linktourl http://code.google.com/p/poark/wiki/HowToUse#pins}
    * @param pin The pin number. If -1 is specified will listen to all pins.
    * @param listener The listener object.
+   * @return True if the listener has been successfully added.
    */
-  public void addPinChangeListener(byte pin, PinChangeListener listener) {
-    pinsListener.pinsListenerClients.put(pin, listener);
+  public boolean addPinChangeListener(byte pin, PinChangeListener listener) {
+    return pinsListener.pinsListenerClients.put(pin, listener);
   }
 
   /**
    * Removes a listener.
    * @param pin The pin this listener was registered for.
    * @param listener The listener object to be removed.
-   * @throws ParameterNotFoundException if this listener was not registered for this port.
+   * @return True if the listener has been successfully removed.
    */
-  public void removePinChangeListener(
-      byte pin, PinChangeListener listener) throws ParameterNotFoundException {
-    if (pinsListener.pinsListenerClients.containsEntry(pin, listener))
-      pinsListener.pinsListenerClients.remove(pin, listener);
-    else throw new ParameterNotFoundException("No such listener registered.");
+  public boolean removePinChangeListener(byte pin, PinChangeListener listener) {
+    return pinsListener.pinsListenerClients.remove(pin, listener);
   }
 
   /**
@@ -226,22 +220,21 @@ public class PoarkClient {
    * {@linktourl http://code.google.com/p/poark/wiki/HowToUse#i2c_response}
    * @param address The i2c slave address. If -1 is specified will listen to addresses.
    * @param listener The listener object.
+   * @return True if the listener has been successfully added.
    */
-  public void addI2CResponseListener(byte address, I2CResponseListener listener) {
-    i2cListener.listenerClients.put(address, listener);
+  public boolean addI2CResponseListener(byte address, I2CResponseListener listener) {
+    return i2cListener.listenerClients.put(address, listener);
   }
 
   /**
    * Removes a listener.
    * @param address The i2c slave address.
    * @param listener The listener object to be removed.
-   * @throws ParameterNotFoundException if this listener was not registered.
+   * @return True if the listener has been successfully removed.
    */
-  public void removeI2CResponseListener(
-      byte address, I2CResponseListener listener) throws ParameterNotFoundException {
-    if (i2cListener.listenerClients.containsEntry(address, listener))
-      i2cListener.listenerClients.remove(address, listener);
-    else throw new ParameterNotFoundException("No such listener registered.");
+  public boolean removeI2CResponseListener(
+      byte address, I2CResponseListener listener) {
+    return i2cListener.listenerClients.remove(address, listener);
   }
 
   /**

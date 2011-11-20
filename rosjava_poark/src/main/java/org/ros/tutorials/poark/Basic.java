@@ -42,13 +42,12 @@ public class Basic implements NodeMain {
   private final byte kButton1 = Poark.A6;
 
   @Override
-  public void main(NodeConfiguration configuration) {
-    Preconditions.checkState(node == null);
-    Preconditions.checkNotNull(configuration);
+  public void main(Node node) throws Exception {
+    Preconditions.checkState(this.node == null);
+    this.node = node;
     try {
-      node = new DefaultNodeFactory().newNode("basic_poark_client", configuration);
       final Log log = node.getLog();
-      // Atach the client to the node and add some pin listeners.
+      // Attach the client to the node and add some pin listeners.
       poarkClient = new PoarkClient(Poark.BoardLayout.MegaLayout, node);
       poarkClient.addPinChangeListener(kButton1,
           new PinChangeListener() {
@@ -84,4 +83,5 @@ public class Basic implements NodeMain {
     node.shutdown();
     node = null;
   }
+
 }

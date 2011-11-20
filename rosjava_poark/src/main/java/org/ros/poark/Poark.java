@@ -31,7 +31,7 @@ public class Poark {
   // Pin digital state constants for maximal Arduino taste.
   public static final byte LOW = 0;
   public static final byte HIGH = 1;
-  // Port Modes as defined by the Poark server.
+  // Pin Modes as defined by the Poark server.
   public static final byte OUT = 0, IN = 1,                 // Digital I/O.
                            ANALOG = 2, ANALOG_FILTERED = 3, // Analog input.
                            PWM_MODE = 4,                    // PWM output.
@@ -115,15 +115,15 @@ public class Poark {
    * @param address The i2c slave address to talk to.
    * @param token User chosen token that will be sent back with the i2c_response message.
    * @param data The data to be sent to the i2c slave. Can be of zero length.
-   * @param receive_lenght The number of bytes to wait for from the slave. Can be zero.
+   * @param receive_length The number of bytes to wait for from the slave. Can be zero.
    * @return An array ready for sending in an i2c_io message.
    */
   public static UInt8MultiArray createI2CPackage(byte address, byte token,
-                                                 byte[] data, int receive_lenght) {
+                                                 byte[] data, int receive_length) {
     UInt8MultiArray i2c_io_data = new UInt8MultiArray();
     i2c_io_data.data = new byte[3 + data.length];
     i2c_io_data.data[0] = address;
-    i2c_io_data.data[1] = (byte)receive_lenght;
+    i2c_io_data.data[1] = (byte)receive_length;
     i2c_io_data.data[2] = token;
     System.arraycopy(data, 0, i2c_io_data.data, 3, data.length);
     return i2c_io_data;
