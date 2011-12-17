@@ -1,6 +1,8 @@
 #include <WProgram.h>
 
-#include <ros.h>
+#include <arduino_hardware.h>
+#include <ros/node_handle.h>
+#include <ros/publisher.h>
 #include <std_msgs/Empty.h>
 #include <std_msgs/String.h>
 #include <std_msgs/UInt8MultiArray.h>
@@ -60,7 +62,7 @@ const int kLedPin = 13;
 
 ////////////////////////
 // Defines a pin and stores its state.
-typedef struct PinConfig{
+struct PinConfig{
   enum PinMode { OUT, IN, ANALOG, ANALOG_FILT, PWM_MODE, SERVO, NONE=0xff };
   PinMode pin_mode;
   int state;
@@ -125,7 +127,8 @@ int g_dbg_line_right = 0;
 #endif  // LCD_DEBUG
 
 // ROS Definitions
-ros::NodeHandle g_node_handle;
+ArduinoHardware hardware;
+ros::NodeHandle g_node_handle(&hardware);
 
 // Output data buffer (+2 needed to include timestamp).
 unsigned int g_ports_msg_out_data[2 * kPinCount + 2];
@@ -465,8 +468,6 @@ void ReadSamples() {
 // Arduino setup function. Called once for initialization.
 void setup()
 {
-  g_node_handle.initNode();
-
   // Define the output arrays.
   g_ports_msg_out.data_length = kPinCount*4;
   g_ports_msg_out.data = g_ports_msg_out_data;
@@ -501,6 +502,8 @@ void setup()
   MsTimer2::set(1000 / g_sample_frequency, ReadSamples);
   MsTimer2::start();
 #endif  // WITH TIMER
+
+  hardware.init();
 
   //initialize the LED output pin,
   pinMode(kLedPin, OUTPUT);
