@@ -481,7 +481,7 @@ void ReadSamples() {
 void setup()
 {
   // Define the output arrays.
-  g_ports_msg_out.data_length = kPinCount*4;
+  g_ports_msg_out.data_length = 2*kPinCount;
   g_ports_msg_out.data = g_ports_msg_out_data;
   g_i2c_msg_out.data_length = 255;
   g_i2c_msg_out.data = g_i2c_msg_out_data;
