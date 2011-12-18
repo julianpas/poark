@@ -1,4 +1,8 @@
+#if defined(ARDUINO) && ARDUINO >= 100
+#include <Arduino.h>
+#else
 #include <WProgram.h>
+#endif
 
 #include <arduino_hardware.h>
 #include <ros/node_handle.h>
@@ -322,7 +326,11 @@ void I2cIO(const std_msgs::UInt8MultiArray& i2c_msg_in) {
   int token = i2c_msg_in.data[2];
   if (send_len > 0) {
     Wire.beginTransmission(address);
+#if defined(ARDUINO) && ARDUINO >= 100
+    Wire.write(&i2c_msg_in.data[3], send_len);
+#else
     Wire.send(&i2c_msg_in.data[3], send_len);
+#endif
     Wire.endTransmission();
   }
   g_i2c_msg_out.data_length = 2;
@@ -335,7 +343,11 @@ void I2cIO(const std_msgs::UInt8MultiArray& i2c_msg_in) {
       // the last byte is caused by the joystick or if it is an I2C
       // feature.
       while (Wire.available())
+#if defined(ARDUINO) && ARDUINO >= 100
+        g_i2c_msg_out.data[g_i2c_msg_out.data_length] = Wire.read();
+#else
         g_i2c_msg_out.data[g_i2c_msg_out.data_length] = Wire.receive();
+#endif
     }
   }
   g_need_i2c_publish = true;
