@@ -28,6 +28,14 @@
 #define WITH_WIRE 1
 
 #ifdef LCD_DEBUG
+// Redefine PROGMEM to avoid the warning: only initialized variables can be
+// placed into program memory area which appears when compiling from the console
+#include <avr/pgmspace.h>
+#ifdef PROGMEM
+#undef PROGMEM
+#define PROGMEM __attribute__((section(".progmem.data")))
+#endif
+
 #include <ks0108.h>
 #include "SystemFont5x7.h"
 
@@ -526,7 +534,7 @@ void setup()
   GLCD.ClearScreen();
   GLCD.SelectFont(System5x7);
   GLCD.CursorTo(0,0);
-  GLCD.Puts("Ready.");
+  GLCD.Puts_P(PSTR("Ready."));
 #endif  // WITH_ LCD_DEBUG
 }
 
