@@ -1,0 +1,9 @@
+# Directories
+bin/
+build/
+msg_gen/
+srv_gen/
+
+# Files
+*.cmake
+_*
