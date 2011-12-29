@@ -36,8 +36,8 @@
 #define PROGMEM __attribute__((section(".progmem.data")))
 #endif
 
-#include <ks0108.h>
-#include "SystemFont5x7.h"
+#include <glcd.h>
+#include <fonts/SystemFont5x7.h>
 
 #define LCD_DEBUG_MSG_LEFT(...) \
     sprintf(g_dbg_text, __VA_ARGS__);\
