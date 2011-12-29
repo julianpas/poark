@@ -381,8 +381,10 @@ void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
       case SET_FREQUENCY:
         g_sample_frequency = config_msg_in.data[index++];
         g_servo_refresh_cycle = (35 * g_sample_frequency) / 1000;
+#ifdef WITH_TIMER
         MsTimer2::set(1000 / g_sample_frequency, ReadSamples);
         MsTimer2::start();
+#endif  // WITH_TIMER
         LCD_DEBUG_MSG_RIGHT("freq: %3d  ", g_sample_frequency);
         break;
       case SET_CONTINUOUS_MODE:
