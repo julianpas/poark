@@ -126,8 +126,10 @@ byte g_analog_ref = DEFAULT;
 // (~100 samples window)
 float g_filter_lambda = 0.99;
 
+#ifdef WITH_WIRE
 // Maximal length of I2C message in bytes.
 const int kMaxI2CResponseLen = 10;
+#endif  // WITH_WIRE
 // Maximal length of status response.
 const int kMaxPoarkStatusLength = 250;
 
@@ -144,12 +146,18 @@ ros::NodeHandle g_node_handle(&hardware);
 
 // Output data buffer (+2 needed to include timestamp).
 unsigned int g_ports_msg_out_data[2 * kPinCount + 2];
+#ifdef WITH_WIRE
 byte g_i2c_msg_out_data[kMaxI2CResponseLen + 2];
+#endif  // WITH_WIRE
 char g_poark_status_msg_out_data[kMaxPoarkStatusLength + 1];
 std_msgs::UInt16MultiArray g_ports_msg_out;
+#ifdef WITH_WIRE
 std_msgs::UInt8MultiArray g_i2c_msg_out;
+#endif  // WITH_WIRE
 std_msgs::String g_poark_status_msg_out;
+#ifdef WITH_WIRE
 bool g_need_i2c_publish = false;
+#endif  // WITH_WIRE
 // These variables will be read both from the main loop and the timer
 // interrupt therefore they shoud be volatile.
 volatile bool g_need_poark_status_publish = false;
@@ -493,8 +501,10 @@ void setup()
   // Define the output arrays.
   g_ports_msg_out.data_length = 2*kPinCount;
   g_ports_msg_out.data = g_ports_msg_out_data;
+#ifdef WITH_WIRE
   g_i2c_msg_out.data_length = 255;
   g_i2c_msg_out.data = g_i2c_msg_out_data;
+#endif  // WITH_WIRE
   g_poark_status_msg_out.data = g_poark_status_msg_out_data;
 
   // Digital and analog pin interface
@@ -552,12 +562,12 @@ void loop()
   g_publishing = true;
 #endif  // WITH_TIMER
   // Check for new messages and send all our output messages.
-#ifdef WITH_I2C
+#ifdef WITH_WIRE
   if (g_need_i2c_publish) {
     g_need_i2c_publish = false;
     pub_i2c_response.publish(&g_i2c_msg_out);
   }
-#endif  // WITH_I2C
+#endif  // WITH_WIRE
   if (g_need_pin_state_publish) {
     g_need_pin_state_publish = false;
     pub_pin_state_changed.publish(&g_ports_msg_out);
