@@ -49,24 +49,39 @@
     GLCD.CursorTo(12, g_dbg_line_right++ % 8);\
     GLCD.Puts(g_dbg_text)
 
+// Buffer for debug text output to the display.
+char g_dbg_text[20];
+int g_dbg_line_left = 0;
+int g_dbg_line_right = 0;
+
+inline void InitLCDDebug() {
+  GLCD.Init(NON_INVERTED);
+  GLCD.ClearScreen();
+  GLCD.SelectFont(System5x7);
+  GLCD.CursorTo(0,0);
+  GLCD.Puts_P(PSTR("Ready."));
+}
+
 #else  // LCD_DEBUG
 
 #define LCD_DEBUG_MSG_LEFT(...)
 #define LCD_DEBUG_MSG_RIGHT(...)
 
+inline void InitLCDDebug() {}
+
 #endif  // LCD_DEBUG
+
+#ifdef WITH_TIMER
+#include <MsTimer2.h>
+#endif // WITH_TIMER
 
 #ifdef WITH_SERVO
 #include <Servo.h>
 #endif
 
-#ifdef WITH_TIMER
-#include <MsTimer2.h>
-#endif
-
 #ifdef WITH_WIRE
 #include <Wire.h>
-#endif
+#endif // WITH_WIRE
 
 ////////////////////////
 // Debug definitions.
@@ -126,54 +141,19 @@ byte g_analog_ref = DEFAULT;
 // (~100 samples window)
 float g_filter_lambda = 0.99;
 
-#ifdef WITH_WIRE
-// Maximal length of I2C message in bytes.
-const int kMaxI2CResponseLen = 10;
-#endif  // WITH_WIRE
-// Maximal length of status response.
-const int kMaxPoarkStatusLength = 250;
-
-#ifdef LCD_DEBUG
-// Buffer for debug text output to the display.
-char g_dbg_text[20];
-int g_dbg_line_left = 0;
-int g_dbg_line_right = 0;
-#endif  // LCD_DEBUG
-
 // ROS Definitions
-ArduinoHardware hardware;
-ros::NodeHandle g_node_handle(&hardware);
+ArduinoHardware g_hardware;
+ros::NodeHandle g_node_handle(&g_hardware);
 
 // Output data buffer (+2 needed to include timestamp).
 unsigned int g_ports_msg_out_data[2 * kPinCount + 2];
-#ifdef WITH_WIRE
-byte g_i2c_msg_out_data[kMaxI2CResponseLen + 2];
-#endif  // WITH_WIRE
-char g_poark_status_msg_out_data[kMaxPoarkStatusLength + 1];
 std_msgs::UInt16MultiArray g_ports_msg_out;
-#ifdef WITH_WIRE
-std_msgs::UInt8MultiArray g_i2c_msg_out;
-#endif  // WITH_WIRE
-std_msgs::String g_poark_status_msg_out;
-#ifdef WITH_WIRE
-bool g_need_i2c_publish = false;
-#endif  // WITH_WIRE
 // These variables will be read both from the main loop and the timer
 // interrupt therefore they shoud be volatile.
-volatile bool g_need_poark_status_publish = false;
 volatile bool g_need_pin_state_publish = false;
 volatile bool g_publishing = false;
 
 void ReadSamples();
-
-inline void RequestStatusMsg(const char* msg) {
-  // This test is to protect against strcpy-ing with the same source and
-  // destination which is undefined.  If inlined, this should be optimized
-  // away in most common cases.
-  if (msg != g_poark_status_msg_out_data)
-    strcpy(g_poark_status_msg_out_data, msg);
-  g_need_poark_status_publish = true;
-}
 
 inline bool IsInputMode(PinConfig::PinMode mode) {
   return (mode == PinConfig::IN ||
@@ -217,8 +197,70 @@ void SetPin(int pin, int state) {
   }
 }
 
-// The communication primitives.
+// Maximal length of status response.
+const int kMaxPoarkStatusLength = 250;
+char g_poark_status_msg_out_data[kMaxPoarkStatusLength + 1];
+std_msgs::String g_poark_status_msg_out;
+// This variable is read both from main loop and timer interrupt hence volatile.
+volatile bool g_need_poark_status_publish = false;
+
+inline void RequestStatusMsg(const char* msg) {
+  // This test is to protect against strcpy-ing with the same source and
+  // destination which is undefined.  If inlined, this should be optimized
+  // away in most common cases.
+  if (msg != g_poark_status_msg_out_data)
+    strcpy(g_poark_status_msg_out_data, msg);
+  g_need_poark_status_publish = true;
+}
+
+void RequestStatus(const std_msgs::Empty& empty_msg_in) {
+  // Hold your breath for a huge ifdef orgy.
+  // Note, this will overwrite any already queued messages!
+  sprintf(g_poark_status_msg_out_data,
+      "{\n  board_layout: \"%s\";\n  frequency: %d;"
+      "\n  continuous mode: %d;\n  analog_ref: %d;"
+      "\n  timestamp: %d;"
+      "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
+      "\n  with_i2c: %c;\n  with_timer: %c;\n  lcd_debug: %c;\n}",
+#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+      "mega_layout",
+#else
+      "mini_layout",
+#endif  // ATmega[1280|2560]
+      g_sample_frequency,
+      g_continuous_mode,
+      g_analog_ref,
+      g_timestamp,
+      static_cast<int>(g_filter_lambda * 1000),
+#ifdef WITH_SERVO
+      '1',
+#else
+      '0',
+#endif  // WITH_SERVO
+#ifdef WITH_WIRE
+      '1',
+#else
+      '0',
+#endif  // WITH_WIRE
+#ifdef WITH_TIMER
+      '1',
+#else
+      '0',
+#endif  // WITH_TIMER
+#ifdef LCD_DEBUG
+      '1');
+#else
+      '0');
+#endif  // LCD_DEBUG
+  RequestStatusMsg(g_poark_status_msg_out_data);
+  LCD_DEBUG_MSG_RIGHT("Status");
+}
+
 ros::Publisher pub_poark_status("poark_status", &g_poark_status_msg_out);
+ros::Subscriber<std_msgs::Empty> sub_request_config("request_poark_config",
+                                                    RequestStatus);
+
+// The communication primitives.
 ros::Publisher pub_pin_state_changed("pins", &g_ports_msg_out);
 
 // The callback for the set_pins_mode message.
@@ -277,58 +319,19 @@ void SetPins(const std_msgs::UInt8MultiArray& pins_msg_in) {
   }
 }
 
-void RequestStatus(const std_msgs::Empty& empty_msg_in) {
-  // Hold your breath for a huge ifdef orgy.
-  // Note, this will overwrite any already queued messages!
-  sprintf(g_poark_status_msg_out_data,
-      "{\n  board_layout: \"%s\";\n  frequency: %d;"
-      "\n  continuous mode: %d;\n  analog_ref: %d;"
-      "\n  timestamp: %d;"
-      "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
-      "\n  with_i2c: %c;\n  with_timer: %c;\n  lcd_debug: %c;\n}",
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
-      "mega_layout",
-#else
-      "mini_layout",
-#endif  // ATmega[1280|2560]
-      g_sample_frequency,
-      g_continuous_mode,
-      g_analog_ref,
-      g_timestamp,
-      static_cast<int>(g_filter_lambda * 1000),
-#ifdef WITH_SERVO
-      '1',
-#else
-      '0',
-#endif  // WITH_SERVO
-#ifdef WITH_WIRE
-      '1',
-#else
-      '0',
-#endif  // WITH_WIRE
-#ifdef WITH_TIMER
-      '1',
-#else
-      '0',
-#endif  // WITH_TIMER
-#ifdef LCD_DEBUG
-      '1');
-#else
-      '0');
-#endif  // LCD_DEBUG
-  RequestStatusMsg(g_poark_status_msg_out_data);
-  LCD_DEBUG_MSG_RIGHT("Status");
-}
-
 // The subscriber objects for set_pins_mode and set_pins_state.
 ros::Subscriber<std_msgs::UInt8MultiArray> sub_set_pins_mode("set_pins_mode",
                                                              SetPinsState);
 ros::Subscriber<std_msgs::UInt8MultiArray> sub_set_pins_state("set_pins_state",
                                                               SetPins);
-ros::Subscriber<std_msgs::Empty> sub_request_config("request_poark_config",
-                                                    RequestStatus);
 
 #ifdef WITH_WIRE
+// Maximal length of I2C message in bytes.
+const int kMaxI2CResponseLen = 10;
+byte g_i2c_msg_out_data[kMaxI2CResponseLen + 2];
+std_msgs::UInt8MultiArray g_i2c_msg_out;
+bool g_need_i2c_publish = false;
+
 // The publisher for i2c_response.
 ros::Publisher pub_i2c_response("i2c_response", &g_i2c_msg_out);
 
@@ -372,6 +375,25 @@ void I2cIO(const std_msgs::UInt8MultiArray& i2c_msg_in) {
 
 ros::Subscriber<std_msgs::UInt8MultiArray> sub_i2c_io("i2c_io", I2cIO);
 
+inline void PublishI2CResponce() {
+  if (g_need_i2c_publish) {
+    g_need_i2c_publish = false;
+    pub_i2c_response.publish(&g_i2c_msg_out);
+  }
+}
+
+inline void InitI2CInterface() {
+  // I2C interface
+  g_i2c_msg_out.data_length = 255;
+  g_i2c_msg_out.data = g_i2c_msg_out_data;
+
+  g_node_handle.advertise(pub_i2c_response);
+  g_node_handle.subscribe(sub_i2c_io);
+  Wire.begin();
+}
+#else  // WITH_WIRE
+inline void PublishI2CResponce() {}
+inline void InitI2CInterface() {}
 #endif  // WITH_WIRE
 
 void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
@@ -501,10 +523,6 @@ void setup()
   // Define the output arrays.
   g_ports_msg_out.data_length = 2*kPinCount;
   g_ports_msg_out.data = g_ports_msg_out_data;
-#ifdef WITH_WIRE
-  g_i2c_msg_out.data_length = 255;
-  g_i2c_msg_out.data = g_i2c_msg_out_data;
-#endif  // WITH_WIRE
   g_poark_status_msg_out.data = g_poark_status_msg_out_data;
 
   // Digital and analog pin interface
@@ -522,12 +540,7 @@ void setup()
     g_pins[i].state = LOW;
   }
 
-#ifdef WITH_WIRE
-  // I2C interface
-  g_node_handle.advertise(pub_i2c_response);
-  g_node_handle.subscribe(sub_i2c_io);
-  Wire.begin();
-#endif  // WITH_WIRE
+  InitI2CInterface();
 
 #ifdef WITH_TIMER
   // Initialize the timer interrupt.
@@ -535,19 +548,12 @@ void setup()
   MsTimer2::start();
 #endif  // WITH TIMER
 
-  hardware.init();
+  g_hardware.init();
 
   //initialize the LED output pin,
   pinMode(kLedPin, OUTPUT);
   digitalWrite(kLedPin, HIGH);
-#ifdef LCD_DEBUG
-  // ...and a display driver.
-  GLCD.Init(NON_INVERTED);
-  GLCD.ClearScreen();
-  GLCD.SelectFont(System5x7);
-  GLCD.CursorTo(0,0);
-  GLCD.Puts_P(PSTR("Ready."));
-#endif  // WITH_ LCD_DEBUG
+  InitLCDDebug();
 }
 
 // The main loop. the Arduino bootloader will call this over
@@ -562,12 +568,8 @@ void loop()
   g_publishing = true;
 #endif  // WITH_TIMER
   // Check for new messages and send all our output messages.
-#ifdef WITH_WIRE
-  if (g_need_i2c_publish) {
-    g_need_i2c_publish = false;
-    pub_i2c_response.publish(&g_i2c_msg_out);
-  }
-#endif  // WITH_WIRE
+  PublishI2CResponce();
+
   if (g_need_pin_state_publish) {
     g_need_pin_state_publish = false;
     pub_pin_state_changed.publish(&g_ports_msg_out);
