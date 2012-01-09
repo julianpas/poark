@@ -22,6 +22,10 @@ const int kPinCount = 70;
 const int kServoControlPin = 54;
 const int kServoPin = 7;
 
+const int kRLED = 2;
+const int kGLED = 3;
+const int kBLED = 4;
+
 const int kTimestampPin  = 0x8000;
 const int kTimestampMask = 0x7FFF;
 
@@ -102,10 +106,9 @@ int main(int argc, char **argv)
   // Set up some pins in different modes.
   std_msgs::UInt8MultiArray msg;
   msg.data.clear();
-  AddPinDefinition(&msg, 13, OUT, LOW);
-  AddPinDefinition(&msg, 8, PWM_MODE, 0);
-  AddPinDefinition(&msg, 9, PWM_MODE, 0);
-  AddPinDefinition(&msg, 10, PWM_MODE, 0);
+  AddPinDefinition(&msg, kRLED, PWM_MODE, 0);
+  AddPinDefinition(&msg, kGLED, PWM_MODE, 0);
+  AddPinDefinition(&msg, kBLED, PWM_MODE, 0);
   AddPinDefinition(&msg, kServoControlPin, ANALOG, LOW);
   AddPinDefinition(&msg, kServoPin, SERVO, 90);
   ROS_INFO("Sending /set_pins_mode msg.");
@@ -149,10 +152,9 @@ int main(int argc, char **argv)
     if (count % 10 == 0) {
       std_msgs::UInt8MultiArray msg2;
       msg2.data.clear();
-      AddPinState(&msg2, 8, (count/10) % 50 + 200);
-      AddPinState(&msg2, 9, (count/10) % 50 + 200);
-      AddPinState(&msg2, 10, (count/10) % 50 + 200);
-      AddPinState(&msg2, 13, count % 200 == 0 ? HIGH : LOW);
+      AddPinState(&msg2, kRLED, (count/10) % 50 + 200);
+      AddPinState(&msg2, kGLED, (count/10) % 50 + 200);
+      AddPinState(&msg2, kBLED, (count/10) % 50 + 200);
       ROS_INFO("Sending set_pins_state msg : %d.", count);
       pins_state_pub.publish(msg2);
     }
@@ -171,10 +173,9 @@ int main(int argc, char **argv)
   }
 
   msg.data.clear();
-  AddPinDefinition(&msg, 13, NONE, LOW);
-  AddPinDefinition(&msg, 8, PWM_MODE, 255);
-  AddPinDefinition(&msg, 9, PWM_MODE, 255);
-  AddPinDefinition(&msg, 10, PWM_MODE, 255);
+  AddPinDefinition(&msg, kRLED, PWM_MODE, 255);
+  AddPinDefinition(&msg, kGLED, PWM_MODE, 255);
+  AddPinDefinition(&msg, kBLED, PWM_MODE, 255);
   AddPinDefinition(&msg, kServoControlPin, NONE, LOW);
   AddPinDefinition(&msg, kServoPin, NONE, LOW);
   ROS_INFO("Sending /set_pins_mode msg.");
