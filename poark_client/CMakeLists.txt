@@ -31,3 +31,4 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 
 rosbuild_add_executable(poark_client src/poark_client.cpp)
 rosbuild_add_executable(poark_i2c_demo src/poark_i2c_demo.cpp)
+rosbuild_add_executable(poark_serial_demo src/poark_serial_demo.cpp)

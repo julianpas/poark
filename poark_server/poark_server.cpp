@@ -26,6 +26,16 @@
 // The wire library is used for the I2C interface. If switched off all i2c
 // related topics will not function.
 #define WITH_WIRE 1
+// The serial code depends on Arduino 1.0+.  If WITH_SERIAL is left undefined,
+// no serial code will be generated and the serial interface cannot be used.
+#if defined(ARDUINO) && ARDUINO >= 100
+#define WITH_SERIAL 1
+#endif // Arduino 1.0+
+
+#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+#define ARDUINO_MEGA 1
+#endif  // ATmega[1280|2560]
+
 
 #ifdef LCD_DEBUG
 // Redefine PROGMEM to avoid the warning: only initialized variables can be
@@ -100,11 +110,11 @@ struct PinConfig{
 #endif
 };
 // Number of pins to be controlled (70 on a Mega board)
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+#ifdef ARDUINO_MEGA
 const int kPinCount = 70;
 #else
 const int kPinCount = 15;
-#endif  // Atmega[1280|2560]
+#endif  // ARDUINO_MEGA
 
 // True if the server works in continuous mode (send back values each cycle)
 int g_continuous_mode = false;
@@ -114,7 +124,8 @@ enum ConfigCommand { REQUEST_CONFIG=0x00,
                      SET_CONTINUOUS_MODE,
                      SET_FILTER_LAMBDA,
                      SET_TIMESTAMP,
-                     SET_ANALOG_REF };
+                     SET_ANALOG_REF,
+                     SETUP_SERIAL };
 
 // Sampling frequency in Hz.
 int g_sample_frequency = 100;
@@ -154,6 +165,7 @@ volatile bool g_need_pin_state_publish = false;
 volatile bool g_publishing = false;
 
 void ReadSamples();
+inline void RequestStatusMsg(const char* msg);
 
 inline bool IsInputMode(PinConfig::PinMode mode) {
   return (mode == PinConfig::IN ||
@@ -196,69 +208,6 @@ void SetPin(int pin, int state) {
       digitalWrite(pin, g_pins[pin].state);
   }
 }
-
-// Maximal length of status response.
-const int kMaxPoarkStatusLength = 250;
-char g_poark_status_msg_out_data[kMaxPoarkStatusLength + 1];
-std_msgs::String g_poark_status_msg_out;
-// This variable is read both from main loop and timer interrupt hence volatile.
-volatile bool g_need_poark_status_publish = false;
-
-inline void RequestStatusMsg(const char* msg) {
-  // This test is to protect against strcpy-ing with the same source and
-  // destination which is undefined.  If inlined, this should be optimized
-  // away in most common cases.
-  if (msg != g_poark_status_msg_out_data)
-    strcpy(g_poark_status_msg_out_data, msg);
-  g_need_poark_status_publish = true;
-}
-
-void RequestStatus(const std_msgs::Empty& empty_msg_in) {
-  // Hold your breath for a huge ifdef orgy.
-  // Note, this will overwrite any already queued messages!
-  sprintf(g_poark_status_msg_out_data,
-      "{\n  board_layout: \"%s\";\n  frequency: %d;"
-      "\n  continuous mode: %d;\n  analog_ref: %d;"
-      "\n  timestamp: %d;"
-      "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
-      "\n  with_i2c: %c;\n  with_timer: %c;\n  lcd_debug: %c;\n}",
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
-      "mega_layout",
-#else
-      "mini_layout",
-#endif  // ATmega[1280|2560]
-      g_sample_frequency,
-      g_continuous_mode,
-      g_analog_ref,
-      g_timestamp,
-      static_cast<int>(g_filter_lambda * 1000),
-#ifdef WITH_SERVO
-      '1',
-#else
-      '0',
-#endif  // WITH_SERVO
-#ifdef WITH_WIRE
-      '1',
-#else
-      '0',
-#endif  // WITH_WIRE
-#ifdef WITH_TIMER
-      '1',
-#else
-      '0',
-#endif  // WITH_TIMER
-#ifdef LCD_DEBUG
-      '1');
-#else
-      '0');
-#endif  // LCD_DEBUG
-  RequestStatusMsg(g_poark_status_msg_out_data);
-  LCD_DEBUG_MSG_RIGHT("Status");
-}
-
-ros::Publisher pub_poark_status("poark_status", &g_poark_status_msg_out);
-ros::Subscriber<std_msgs::Empty> sub_request_config("request_poark_config",
-                                                    RequestStatus);
 
 // The communication primitives.
 ros::Publisher pub_pin_state_changed("pins", &g_ports_msg_out);
@@ -396,12 +345,298 @@ inline void PublishI2CResponce() {}
 inline void InitI2CInterface() {}
 #endif  // WITH_WIRE
 
+////////////////////////
+// Serial interfaces
+
+#ifdef ARDUINO_MEGA
+const int kSerialCount = 4;
+#else
+const int kSerialCount = 1;
+#endif  // ARDUINO_MEGA
+
+#if WITH_SERIAL
+// Maximal length of Serial message in bytes.
+const int kMaxSerialResponseLen = 10;
+
+struct SerialConfig {
+  HardwareSerial* serial;
+  ros::Publisher* pub_receive;
+  ros::Subscriber<std_msgs::UInt8MultiArray>* sub_send;
+  bool active;
+  bool need_publish;
+  std_msgs::UInt8MultiArray msg_out;
+  byte msg_out_data[kMaxSerialResponseLen + 2];
+};
+
+// Allow for easy initialization of the SerialConfig structure
+// unfortunately the Arduino specifies the serial interfaces as
+// Serial, Serial1, ... motivating the usage of a define.
+#define INIT_SERIAL_CONFIG(C, N) \
+    C.serial = &Serial##N; \
+    C.pub_receive = &pub_serial##N##_receive; \
+    C.sub_send = &sub_serial##N##_send; \
+    C.active = false; \
+    C.need_publish = false; \
+    C.msg_out.data = C.msg_out_data; \
+    C.msg_out.data_length = kMaxSerialResponseLen;
+
+// Set up constants for serial baud rates, as defined in <termios.h> with
+// s/B/BAUD/
+enum BaudRate { BAUD0       = 0x0000,   // Hang up
+                BAUD50      = 0x0001,   // 50 baud
+                BAUD75      = 0x0002,   // 75 baud
+                BAUD110     = 0x0003,   // 110 baud
+                BAUD134     = 0x0004,   // 134.5 baud
+                BAUD150     = 0x0005,   // 150 baud
+                BAUD200     = 0x0006,   // 200 baud
+                BAUD300     = 0x0007,   // 300 baud
+                BAUD600     = 0x0008,   // 600 baud
+                BAUD1200    = 0x0009,   // 1200 baud
+                BAUD1800    = 0x000A,   // 1800 baud
+                BAUD2400    = 0x000B,   // 2400 baud
+                BAUD4800    = 0x000C,   // 4800 baud
+                BAUD9600    = 0x000D,   // 9600 baud
+                BAUD19200   = 0x000E,   // 19200 baud
+                BAUD38400   = 0x000F,   // 38400 baud
+                BAUD57600   = 0x1001,   // 57600 baud
+                BAUD115200  = 0x1002,   // 115200 baud
+                BAUD230400  = 0x1003,   // 230400 baud
+                BAUD460800  = 0x1004,   // 460800 baud
+                BAUD500000  = 0x1005,   // 500000 baud
+                BAUD576000  = 0x1006,   // 576000 baud
+                BAUD921600  = 0x1007,   // 921600 baud
+                BAUD1000000 = 0x1008,   // 1000000 baud
+                BAUD1152000 = 0x1009,   // 1152000 baud
+                BAUD1500000 = 0x100A,   // 1500000 baud
+                BAUD2000000 = 0x100B,   // 2000000 baud
+                BAUD2500000 = 0x100C,   // 2500000 baud
+                BAUD3000000 = 0x100D,   // 3000000 baud
+                BAUD3500000 = 0x100E,   // 3500000 baud
+                BAUD4000000 = 0x100F }; // 4000000 baud
+
+long kBaudRateTable[32] = { 0, 50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800,
+                            2400, 4800, 9600, 19200, 38400, 57600, 115200,
+                            230400, 460800, 500000, 576000, 921600, 1000000,
+                            1152000, 150000, 2000000, 2500000, 3000000, 3500000,
+                            4000000 };
+
+SerialConfig g_serials[kSerialCount];
+
+void SerialRecieve(int port_nr, SerialConfig* serial) {
+  if (serial->active) {
+    serial->msg_out.data_length = 0;
+    while (serial->serial->available()) {
+      serial->msg_out.data[serial->msg_out.data_length++] =
+          serial->serial->read();
+    }
+    serial->need_publish = true;
+    LCD_DEBUG_MSG_RIGHT("Ser%d<%d    ", port_nr, serial->msg_out.data_length);
+  }
+}
+
+// serialEvent[1-3]?() are predefined callback functions in Arduino 1.0+
+// that gets called as data is received on the serial interfaces.  This seems
+// not to work as expected on Arduino versions prior to 1.0.
+void serialEvent() {
+  SerialRecieve(0, &g_serials[0]);
+}
+
+#ifdef ARDUINO_MEGA
+void serialEvent1() {
+  SerialRecieve(1, &g_serials[1]);
+}
+
+void serialEvent2() {
+  SerialRecieve(2, &g_serials[2]);
+}
+
+void serialEvent3() {
+  SerialRecieve(3, &g_serials[3]);
+}
+#endif  // ARDUINO_MEGA
+
+// The callback for the serial_response.
+ros::Publisher pub_serial_receive("serial_receive", &g_serials[0].msg_out);
+#ifdef ARDUINO_MEGA
+ros::Publisher pub_serial1_receive("serial1_receive", &g_serials[1].msg_out);
+ros::Publisher pub_serial2_receive("serial2_receive", &g_serials[2].msg_out);
+ros::Publisher pub_serial3_receive("serial3_receive", &g_serials[3].msg_out);
+#endif  // ARDUINO_MEGA
+
+// The callback for the serial_io message.  Make the template minimal
+// to reduce (generated) code duplication.
+void SerialSendHelper(const std_msgs::UInt8MultiArray& serial_msg_in,
+                      int port_nr,
+                      SerialConfig* serial) {
+  int send_len = serial_msg_in.data_length;
+  send_len = serial->serial->write(&serial_msg_in.data[0], send_len);
+  serial->serial->flush();
+  LCD_DEBUG_MSG_RIGHT("Ser%d>%d    ", port_nr, send_len);
+}
+
+template <int SERIAL_PORT>
+void SerialSend(const std_msgs::UInt8MultiArray& serial_msg_in) {
+  SerialSendHelper(serial_msg_in, SERIAL_PORT, &g_serials[SERIAL_PORT]);
+}
+
+ros::Subscriber<std_msgs::UInt8MultiArray> sub_serial_send("serial_send",
+                                                           &SerialSend<0>);
+#ifdef ARDUINO_MEGA
+ros::Subscriber<std_msgs::UInt8MultiArray> sub_serial1_send("serial1_send",
+                                                            &SerialSend<1>);
+ros::Subscriber<std_msgs::UInt8MultiArray> sub_serial2_send("serial2_send",
+                                                            &SerialSend<2>);
+ros::Subscriber<std_msgs::UInt8MultiArray> sub_serial3_send("serial3_send",
+                                                            &SerialSend<3>);
+#endif  // ARDUINO_MEGA
+
+inline void InitSerialInterface() {
+  INIT_SERIAL_CONFIG(g_serials[0],);
+#ifdef ARDUINO_MEGA
+  INIT_SERIAL_CONFIG(g_serials[1], 1);
+  INIT_SERIAL_CONFIG(g_serials[2], 2);
+  INIT_SERIAL_CONFIG(g_serials[3], 3);
+#endif  // ARDUINO_MEGA
+
+  for (int i=0; i<kSerialCount; ++i) {
+    g_node_handle.advertise(*g_serials[i].pub_receive);
+    g_node_handle.subscribe(*g_serials[i].sub_send);
+  }
+}
+
+inline void PublishSerialReceive() {
+  for (int i=0; i<kSerialCount; ++i) {
+    if (g_serials[i].need_publish) {
+      g_serials[i].need_publish = false;
+      g_serials[i].pub_receive->publish(&g_serials[i].msg_out);
+    }
+  }
+}
+
+void ConfigureSerial(const uint16_t* msg) {
+  byte port = msg[0];
+  // 32bit baud rate encoded with 16bit using kBaudRateTable.
+  long baud = msg[1];
+  if (port >= kSerialCount) {
+    RequestStatusMsg(
+        "{ error: \"Serial port unavailable.\"; error_code: 6; }");
+  } else if (baud & ~0x100F) {
+    RequestStatusMsg(
+        "{ error: \"Serial port, unknown baud rate.\"; error_code: 7; }");
+  } else {
+    // Always close open serial connections before reinitialization.
+    if (g_serials[port].active)
+      g_serials[port].serial->end();
+    if (baud > 0) {  // To deactivate a serial port use:  baud == 0
+      g_serials[port].serial->begin(
+          kBaudRateTable[(baud&0x0F) + ((baud>>12)&0x10)]);
+      while (g_serials[port].serial->available())  // Empty UART cache.
+        g_serials[port].serial->read();
+      g_serials[port].active = true;
+    } else {
+      g_serials[port].active = false;
+    }
+  }
+  LCD_DEBUG_MSG_LEFT("SP%1d: % 6d", port,
+                     kBaudRateTable[(baud&0x0F)+((baud>>12)&0x10)]);
+}
+#else  // WITH_SERIAL
+inline void InitSerialInterface() {}
+inline void PublishSerialReceive() {}
+
+void ConfigureSerial(const uint16_t*) {
+  RequestStatusMsg(
+      "{ error: \"Serial port unavailable.\"; error_code: 6; }");
+}
+#endif  // WITH_SERIAL
+
+// Maximal length of status response.
+const int kMaxPoarkStatusLength = 250;
+char g_poark_status_msg_out_data[kMaxPoarkStatusLength + 1];
+std_msgs::String g_poark_status_msg_out;
+// This variable is read both from main loop and timer interrupt hence volatile.
+volatile bool g_need_poark_status_publish = false;
+
+inline void RequestStatusMsg(const char* msg) {
+  // This test is to protect against strcpy-ing with the same source and
+  // destination which is undefined.  If inlined, this should be optimized
+  // away in most common cases.
+  if (msg != g_poark_status_msg_out_data)
+    strcpy(g_poark_status_msg_out_data, msg);
+  g_need_poark_status_publish = true;
+}
+
+void RequestStatus(const std_msgs::Empty& empty_msg_in) {
+  // Hold your breath for a huge ifdef orgy.
+  // Note, this will overwrite any already queued messages!
+  sprintf(g_poark_status_msg_out_data,
+      "{\n  board_layout: \"%s\";\n  frequency: %d;"
+      "\n  continuous mode: %d;\n  analog_ref: %d;"
+      "\n  timestamp: %d;\n  serial_ports: %d"
+      "\n  filter_lambda_x_1000: %d;\n  with_servo: %c;"
+      "\n  with_i2c: %c;\n  with_timer: %c;\n  with_serial: %c;"
+      "\n  lcd_debug: %c;\n}",
+#ifdef ARDUINO_MEGA
+      "mega_layout",
+#else
+      "mini_layout",
+#endif  // ARDUINO_MEGA
+      g_sample_frequency,
+      g_continuous_mode,
+      g_analog_ref,
+      g_timestamp,
+      kSerialCount,
+      static_cast<int>(g_filter_lambda * 1000),
+#ifdef WITH_SERVO
+      '1',
+#else
+      '0',
+#endif  // WITH_SERVO
+#ifdef WITH_WIRE
+      '1',
+#else
+      '0',
+#endif  // WITH_WIRE
+#ifdef WITH_TIMER
+      '1',
+#else
+      '0',
+#endif  // WITH_TIMER
+#ifdef WITH_SERIAL
+      '1',
+#else
+      '0',
+#endif  // WITH_SERIAL
+#ifdef LCD_DEBUG
+      '1');
+#else
+      '0');
+#endif  // LCD_DEBUG
+  RequestStatusMsg(g_poark_status_msg_out_data);
+  LCD_DEBUG_MSG_RIGHT("Status");
+}
+
+ros::Publisher pub_poark_status("poark_status", &g_poark_status_msg_out);
+ros::Subscriber<std_msgs::Empty> sub_request_config("request_poark_config",
+                                                    RequestStatus);
+
+// Handle Poark configuration messages
+inline bool CheckConfigDataLength(byte command, int len)
+{
+  if (command == REQUEST_CONFIG)
+    return true;
+  if (command == SETUP_SERIAL)
+    return len>=2;
+  else
+    return len>=1;
+}
+
 void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
   int index = 0;
 
   while (index < config_msg_in.data_length) {
     byte command = config_msg_in.data[index++];
-    if (command != REQUEST_CONFIG && index == config_msg_in.data_length)
+    if (CheckConfigDataLength(command, index - config_msg_in.data_length))
       return RequestStatusMsg("{ error: \"Not enough configure arguments.\";"
                               " error_code: 4; }");
     switch (command) {
@@ -423,7 +658,7 @@ void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
         break;
       case SET_FILTER_LAMBDA:
         g_filter_lambda = config_msg_in.data[index++]/1000.;
-        LCD_DEBUG_MSG_RIGHT("Lambda: %d3",
+        LCD_DEBUG_MSG_RIGHT("Lambda: %3d",
                             static_cast<int>(1000*g_filter_lambda));
         break;
       case SET_TIMESTAMP:
@@ -435,6 +670,11 @@ void SetConfig(const std_msgs::UInt16MultiArray& config_msg_in) {
         analogReference(g_analog_ref);
         LCD_DEBUG_MSG_RIGHT("ARef: %d    ", static_cast<int>(g_analog_ref));
         break;
+      case SETUP_SERIAL: {
+        ConfigureSerial(&config_msg_in.data[index]);
+        index += 2;
+        break;
+      }
       default:
         RequestStatusMsg(
             "{ error: \"Unknown configure command.\"; error_code: 5; }");
@@ -541,6 +781,7 @@ void setup()
   }
 
   InitI2CInterface();
+  InitSerialInterface();
 
 #ifdef WITH_TIMER
   // Initialize the timer interrupt.
@@ -569,7 +810,7 @@ void loop()
 #endif  // WITH_TIMER
   // Check for new messages and send all our output messages.
   PublishI2CResponce();
-
+  PublishSerialReceive();
   if (g_need_pin_state_publish) {
     g_need_pin_state_publish = false;
     pub_pin_state_changed.publish(&g_ports_msg_out);
