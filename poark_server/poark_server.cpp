@@ -36,6 +36,13 @@
 #define ARDUINO_MEGA 1
 #endif  // ATmega[1280|2560]
 
+#ifdef ARDUINO_MEGA
+const int kInterruptCount = 6;
+const int kSerialCount = 4;
+#else
+const int kInterruptCount = 2;
+const int kSerialCount = 1;
+#endif  // ARDUINO_MEGA
 
 #ifdef LCD_DEBUG
 // Redefine PROGMEM to avoid the warning: only initialized variables can be
@@ -97,10 +104,23 @@ inline void InitLCDDebug() {}
 // Debug definitions.
 const int kLedPin = 13;
 
+enum InterruptMode { INT_LOW = 0x00,
+                     INT_RISING = 0x03,
+                     INT_FALLING = 0x02,
+                     INT_CHANGE = 0x01,
+                     INT_NONE = 0xff };
+
 ////////////////////////
 // Defines a pin and stores its state.
 struct PinConfig{
-  enum PinMode { OUT, IN, ANALOG, ANALOG_FILT, PWM_MODE, SERVO, NONE=0xff };
+  enum PinMode { OUT,
+                 IN,
+                 ANALOG,
+                 ANALOG_FILT,
+                 PWM_MODE,
+                 SERVO,
+                 INTERRUPT,
+                 NONE=0xff };
   PinMode pin_mode;
   int state;
   int reading;
@@ -212,6 +232,41 @@ void SetPin(int pin, int state) {
 // The communication primitives.
 ros::Publisher pub_pin_state_changed("pins", &g_ports_msg_out);
 
+volatile unsigned char g_interrupt_count[2][kInterruptCount] = { 0 };
+volatile bool g_interrupt_count_buffer = 0;
+
+template <int INTERRUPT>
+void InterruptFun() {
+ ++g_interrupt_count[g_interrupt_count_buffer][INTERRUPT];
+}
+
+inline byte Pin2Interrupt(byte pin) {
+  switch (pin) {
+    case 2:  // int 0  0x02
+    case 3:  // int 1  0x03
+      return pin & 0x01;
+#ifdef ARDUINO_MEGA
+    case 21: // int 2  0x15
+    case 20: // int 3  0x14
+    case 19: // int 4  0x13
+    case 18: // int 5  0x12
+      return pin - 13;
+#endif  // ARDUINO_MEGA
+    default:
+      return 0;  // How report error
+  }
+}
+
+inline byte Interrupt2Pin(byte interrupt) {
+  static byte interrupt2Pin[kInterruptCount] =
+#ifdef ARDUINO_MEGA
+      { 2, 3, 21, 20, 19, 18 };
+#else
+      { 2, 3 };
+#endif
+  return interrupt2Pin[interrupt%kInterruptCount];
+}
+
 // The callback for the set_pins_mode message.
 void SetPinsState(const std_msgs::UInt8MultiArray& ports_msg_in) {
   for (int i = 0;i < ports_msg_in.data_length/3;i++) {
@@ -230,6 +285,25 @@ void SetPinsState(const std_msgs::UInt8MultiArray& ports_msg_in) {
       RequestStatusMsg(
           "{ error: \"Servo mode is not enabled.\"; error_code: 3; }");
 #endif  // WITH_SERVO
+    if (g_pins[pin].pin_mode == PinConfig::INTERRUPT) {
+      byte interrupt_mode = ports_msg_in.data[i*3 + 2];
+      byte interrupt = Pin2Interrupt(pin);
+      if (interrupt_mode == INT_NONE) {
+        detachInterrupt(interrupt);
+      } else {
+        void (*interrupt_fun[kInterruptCount])() = {
+          &InterruptFun<0>,
+          &InterruptFun<1>,
+#ifdef ARDUINO_MEGA
+          &InterruptFun<2>,
+          &InterruptFun<3>,
+          &InterruptFun<4>,
+          &InterruptFun<5>
+#endif  //ARDUINO_MEGA
+        };
+        attachInterrupt(interrupt, interrupt_fun[interrupt], interrupt_mode);
+      }
+    }
     g_pins[pin].state = ports_msg_in.data[i*3 + 2];
     g_pins[pin].reading = ports_msg_in.data[i*3 + 2];
     if (g_pins[pin].pin_mode != PinConfig::NONE) {
@@ -347,12 +421,6 @@ inline void InitI2CInterface() {}
 
 ////////////////////////
 // Serial interfaces
-
-#ifdef ARDUINO_MEGA
-const int kSerialCount = 4;
-#else
-const int kSerialCount = 1;
-#endif  // ARDUINO_MEGA
 
 #if WITH_SERIAL
 // Maximal length of Serial message in bytes.
@@ -743,6 +811,21 @@ void ReadSamples() {
 #endif  // WITH_SERVO
     }
   }
+
+  // Have any watched interrupts triggered?
+  g_interrupt_count_buffer = !g_interrupt_count_buffer;
+  for (byte i=0; i<6; ++i) {
+    if (byte count = g_interrupt_count[!g_interrupt_count_buffer][i]) {
+      byte pin = Interrupt2Pin(i);
+      msg_pointer[0] = pin;
+      msg_pointer[1] = count;
+      msg_pointer += 2;
+      g_pins[pin].reading = count;
+      ++out_pins_count;
+      g_interrupt_count[!g_interrupt_count_buffer][i] = 0;
+    }
+  }
+
   // Anything changed?
   if (out_pins_count > 0) {
     g_ports_msg_out.data_length = msg_pointer - g_ports_msg_out.data;

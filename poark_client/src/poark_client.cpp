@@ -9,7 +9,21 @@
 const bool LOW = false;
 const bool HIGH = true;
 
-enum PinMode { OUT, IN, ANALOG, ANALOG_FILT, PWM_MODE, SERVO, NONE=0xff };
+enum PinMode { OUT,
+               IN,
+               ANALOG,
+               ANALOG_FILT,
+               PWM_MODE,
+               SERVO,
+               INTERRUPT,
+               NONE=0xff };
+
+enum InterruptMode { INT_LOW = 0x00,
+                     INT_RISING = 0x03,
+                     INT_FALLING = 0x02,
+                     INT_CHANGE = 0x01,
+                     INT_NONE = 0xff };
+
 enum ConfigCommand { REQUEST_CONFIG=0x00,
                      SET_FREQUENCY,
                      SET_CONTINUOUS_MODE,
@@ -19,8 +33,10 @@ enum ConfigCommand { REQUEST_CONFIG=0x00,
                      ERROR=0xff };
 
 const int kPinCount = 70;
+const int kLedPin = 13;
 const int kServoControlPin = 54;
 const int kServoPin = 7;
+const int kInt = 18;  // Interrupt5 on pin 18.
 
 const int kRLED = 2;
 const int kGLED = 3;
@@ -34,6 +50,11 @@ const int kTimestampMask = 0x7FFF;
 // function.
 volatile int g_servo_angle = 90;
 volatile bool g_update_servo_angle = true;
+
+// Variable to control the indicator led by a button, it's volatile
+// by the same reason as above.
+volatile bool g_led_state = false;
+volatile bool g_update_led_state = false;
 
 // A callback for the /pins message from a Poark server.
 // |msg| has the following layout:
@@ -58,6 +79,12 @@ void PinsCallback(const std_msgs::UInt16MultiArray::ConstPtr& msg)
       int angle = static_cast<int>(value*180/1024);
       g_servo_angle = angle;
       g_update_servo_angle = true;
+    } else if (pin == kInt) {
+      // Ignore multiple activations in the same loop as this is likely a result
+      // of poor connections resulting in several transitions.  Proper H/W
+      // countermeasures should be applied in real applications.
+      g_led_state = !g_led_state;
+      g_update_led_state = true;
     }
   }
 }
@@ -111,6 +138,8 @@ int main(int argc, char **argv)
   AddPinDefinition(&msg, kBLED, PWM_MODE, 0);
   AddPinDefinition(&msg, kServoControlPin, ANALOG, LOW);
   AddPinDefinition(&msg, kServoPin, SERVO, 90);
+  AddPinDefinition(&msg, kInt, INTERRUPT, INT_RISING);
+  AddPinDefinition(&msg, kLedPin, OUT, g_led_state);
   ROS_INFO("Sending /set_pins_mode msg.");
   pins_mode_pub.publish(msg);
   // Repeat the sending because ros-serial seems to eat our first message.
@@ -164,6 +193,13 @@ int main(int argc, char **argv)
       AddPinState(&msg, kServoPin, g_servo_angle);
       pins_state_pub.publish(msg);
       g_update_servo_angle = false;
+    }
+    if (g_update_led_state) {
+      std_msgs::UInt8MultiArray msg;
+      msg.data.clear();
+      AddPinState(&msg, kLedPin, g_led_state);
+      pins_state_pub.publish(msg);
+      g_update_led_state = false;
     }
     ros::spinOnce();
     loop_rate.sleep();
