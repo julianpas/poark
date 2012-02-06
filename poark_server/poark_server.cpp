@@ -15,7 +15,13 @@
 // Using LCD_DEBUG will slow down all operations due to the time needed to
 // draw on the LCD. You should only use this for debugging and with lower
 // sampling frequencies.
+// If you have enabled LCD_DEBUG please choose your controller type and enable
+// the apropriate define below.
 #define LCD_DEBUG 1
+// For display with T6963 controller use:
+//#define LCD_T6963C 1
+// For display with KS0108 or BGMicro vk5121 Russian mt12232 or HDxxxxx:
+#define LCD_KS0108 1
 // If this flag is defined servo control will be enabled. This
 // uses different interrupts for different pins on the board so
 // make sure they won't interfere with any other functions you need.
@@ -45,6 +51,13 @@ const int kSerialCount = 1;
 #endif  // ARDUINO_MEGA
 
 #ifdef LCD_DEBUG
+
+// Buffer for debug text output to the display.
+char g_dbg_text[20];
+int g_dbg_line_left = 0;
+int g_dbg_line_right = 0;
+
+#ifdef LCD_KS0108
 // Redefine PROGMEM to avoid the warning: only initialized variables can be
 // placed into program memory area which appears when compiling from the console
 #include <avr/pgmspace.h>
@@ -66,11 +79,6 @@ const int kSerialCount = 1;
     GLCD.CursorTo(12, g_dbg_line_right++ % 8);\
     GLCD.Puts(g_dbg_text)
 
-// Buffer for debug text output to the display.
-char g_dbg_text[20];
-int g_dbg_line_left = 0;
-int g_dbg_line_right = 0;
-
 inline void InitLCDDebug() {
   GLCD.Init(NON_INVERTED);
   GLCD.ClearScreen();
@@ -78,7 +86,32 @@ inline void InitLCDDebug() {
   GLCD.CursorTo(0,0);
   GLCD.Puts_P(PSTR("Ready."));
 }
+#endif  // LCD_KS0108
 
+#ifdef LCD_T6963C
+#include <T6963.h>
+
+#define LCD_WIDTH 240
+#define LCD_HEIGHT 64
+T6963 GLCD(LCD_WIDTH, LCD_HEIGHT, 6, 32);
+
+#define LCD_DEBUG_MSG_LEFT(...) \
+    sprintf(g_dbg_text, __VA_ARGS__);\
+    GLCD.TextGoTo(0, g_dbg_line_left++ % 8);\
+    GLCD.writeString(g_dbg_text)
+
+#define LCD_DEBUG_MSG_RIGHT(...) \
+    sprintf(g_dbg_text, __VA_ARGS__);\
+    GLCD.TextGoTo(20, g_dbg_line_right++ % 8);\
+    GLCD.writeString(g_dbg_text)
+
+inline void InitLCDDebug() {
+  GLCD.Initialize();
+  GLCD.clearText();
+  GLCD.TextGoTo(0,0);
+  GLCD.writeString("Ready.");
+}
+#endif  // LCD_T6963C
 #else  // LCD_DEBUG
 
 #define LCD_DEBUG_MSG_LEFT(...)
