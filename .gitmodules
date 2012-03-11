@@ -1,0 +1,3 @@
+[submodule "rosserial"]
+	path = third_party/rosserial
+	url = https://code.google.com/p/poark.rosserial/
